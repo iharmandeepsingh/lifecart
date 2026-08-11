@@ -8,17 +8,18 @@ generator client {
 }
 
 model User {
-  id               String            @id @default(uuid())
-  email            String            @unique
+  id               String                       @id @default(uuid())
+  email            String                       @unique
   passwordHash     String
   name             String
+  role             String                       @default("USER") // USER, HOUSEHOLD_ADMIN, SYSTEM_ADMIN
   avatarUrl        String?
   householdId      String?
-  household        Household?        @relation(fields: [householdId], references: [id], onDelete: SetNull)
+  household        Household?                   @relation(fields: [householdId], references: [id], onDelete: SetNull)
   memberships      HouseholdMember[]
-  addedItems       GroceryItem[]     @relation("AddedBy")
-  assignedItems    GroceryItem[]     @relation("AssignedTo")
-  paidExpenses     Expense[]         @relation("PaidBy")
+  addedItems       GroceryItem[]                @relation("AddedBy")
+  assignedItems    GroceryItem[]                @relation("AssignedTo")
+  paidExpenses     Expense[]                    @relation("PaidBy")
   expenseSplits    ExpenseSplit[]
   uploadedReceipts Receipt[]
   purchases        PurchaseRecord[]
@@ -26,30 +27,39 @@ model User {
   savedProducts    SavedProduct[]
   ownedProducts    OwnedProduct[]
   documents        Document[]
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+
+  @@index([householdId])
+  @@index([email])
 }
 
 model Household {
-  id               String            @id @default(uuid())
-  name             String
-  inviteCode       String            @unique
-  createdById      String
-  users            User[]
-  members          HouseholdMember[]
-  lists            GroceryList[]
-  expenses         Expense[]
-  receipts         Receipt[]
-  inventory        InventoryItem[]
-  purchases        PurchaseRecord[]
-  notifications    Notification[]
-  alerts           PriceAlert[]
-  savedProducts    SavedProduct[]
-  ownedProducts    OwnedProduct[]
-  documents        Document[]
-  automationConfig AutomationConfig?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id                    String                 @id @default(uuid())
+  name                  String
+  inviteCode            String                 @unique
+  createdById           String
+  currency              String                 @default("EUR") // EUR, INR, USD
+  users                 User[]
+  members               HouseholdMember[]
+  lists                 GroceryList[]
+  expenses              Expense[]
+  receipts              Receipt[]
+  inventory             InventoryItem[]
+  purchases             PurchaseRecord[]
+  notifications         Notification[]
+  alerts                PriceAlert[]
+  savedProducts         SavedProduct[]
+  ownedProducts         OwnedProduct[]
+  documents             Document[]
+  automationConfig      AutomationConfig?
+  ocrEvaluations        OcrEvaluationRecord[]
+  predictionEvaluations PredictionEvaluationRecord[]
+  researchMetrics       ResearchMetric[]
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  @@index([inviteCode])
 }
 
 model HouseholdMember {
@@ -62,6 +72,8 @@ model HouseholdMember {
   joinedAt    DateTime  @default(now())
 
   @@unique([userId, householdId])
+  @@index([householdId])
+  @@index([userId])
 }
 
 model GroceryList {
@@ -73,6 +85,8 @@ model GroceryList {
   items       GroceryItem[]
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
+
+  @@index([householdId])
 }
 
 model GroceryItem {
@@ -93,34 +107,47 @@ model GroceryItem {
   notes          String?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
+
+  @@index([listId])
+  @@index([isPurchased])
 }
 
 model Receipt {
-  id           String           @id @default(uuid())
-  householdId  String
-  household    Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  uploadedById String
-  uploadedBy   User             @relation(fields: [uploadedById], references: [id])
-  storeName    String
-  totalAmount  Float
-  taxAmount    Float            @default(0)
-  receiptDate  DateTime         @default(now())
-  imageUrl     String?
-  rawOcrText   String?
-  items        ReceiptItem[]
-  expenses     Expense[]
-  purchases    PurchaseRecord[]
-  createdAt    DateTime         @default(now())
+  id             String                @id @default(uuid())
+  householdId    String
+  household      Household             @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  uploadedById   String
+  uploadedBy     User                  @relation(fields: [uploadedById], references: [id])
+  storeName      String
+  totalAmount    Float
+  taxAmount      Float                 @default(0)
+  currency       String                @default("EUR")
+  receiptDate    DateTime              @default(now())
+  imageUrl       String?
+  rawOcrText     String?
+  ocrConfidence  Float                 @default(85.0)
+  items          ReceiptItem[]
+  expenses       Expense[]
+  purchases      PurchaseRecord[]
+  evaluations    OcrEvaluationRecord[]
+  createdAt      DateTime              @default(now())
+
+  @@index([householdId])
+  @@index([receiptDate])
 }
 
 model ReceiptItem {
-  id        String  @id @default(uuid())
-  receiptId String
-  receipt   Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
-  name      String
-  category  String  @default("GROCERY")
-  price     Float
-  quantity  Float   @default(1)
+  id               String  @id @default(uuid())
+  receiptId        String
+  receipt          Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  name             String
+  category         String  @default("GROCERY")
+  price            Float
+  quantity         Float   @default(1)
+  confidence       Float   @default(85.0)
+  wasUserCorrected Boolean @default(false)
+
+  @@index([receiptId])
 }
 
 model Expense {
@@ -131,12 +158,16 @@ model Expense {
   paidBy      User           @relation("PaidBy", fields: [paidById], references: [id])
   title       String
   amount      Float
+  currency    String         @default("EUR")
   category    String         @default("GROCERY")
   date        DateTime       @default(now())
   receiptId   String?
   receipt     Receipt?       @relation(fields: [receiptId], references: [id], onDelete: SetNull)
   splits      ExpenseSplit[]
   createdAt   DateTime       @default(now())
+
+  @@index([householdId])
+  @@index([date])
 }
 
 model ExpenseSplit {
@@ -148,6 +179,9 @@ model ExpenseSplit {
   amount    Float
   isSettled Boolean   @default(false)
   settledAt DateTime?
+
+  @@index([expenseId])
+  @@index([userId])
 }
 
 model InventoryItem {
@@ -165,6 +199,10 @@ model InventoryItem {
   lastRestockedAt DateTime  @default(now())
   lastConsumedAt  DateTime?
   updatedAt       DateTime  @updatedAt
+
+  @@index([householdId])
+  @@index([status])
+  @@index([location])
 }
 
 model PurchaseRecord {
@@ -180,9 +218,14 @@ model PurchaseRecord {
   quantity     Float     @default(1)
   unitPrice    Float     @default(0)
   totalPrice   Float     @default(0)
+  currency     String    @default("EUR")
   storeName    String    @default("Grocery Store")
   purchaseDate DateTime  @default(now())
   createdAt    DateTime  @default(now())
+
+  @@index([householdId])
+  @@index([productName])
+  @@index([purchaseDate])
 }
 
 model Notification {
@@ -196,6 +239,8 @@ model Notification {
   isRead      Boolean   @default(false)
   link        String?
   createdAt   DateTime  @default(now())
+
+  @@index([householdId])
 }
 
 model Product {
@@ -213,6 +258,8 @@ model Product {
   ownedBy        OwnedProduct[]
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
+
+  @@index([normalizedName])
 }
 
 model Store {
@@ -237,11 +284,14 @@ model StoreProduct {
   currentPrice Float
   unitPrice    Float          @default(0)
   unit         String         @default("pcs")
+  currency     String         @default("EUR")
   isAvailable  Boolean        @default(true)
   priceHistory PriceHistory[]
   lastUpdated  DateTime       @default(now())
 
   @@unique([productId, storeId])
+  @@index([productId])
+  @@index([storeId])
 }
 
 model PriceHistory {
@@ -250,7 +300,11 @@ model PriceHistory {
   storeProduct   StoreProduct @relation(fields: [storeProductId], references: [id], onDelete: Cascade)
   price          Float
   unitPrice      Float        @default(0)
+  currency       String       @default("EUR")
   recordedAt     DateTime     @default(now())
+
+  @@index([storeProductId])
+  @@index([recordedAt])
 }
 
 model PriceAlert {
@@ -262,8 +316,12 @@ model PriceAlert {
   productId   String
   product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   targetPrice Float
+  currency    String    @default("EUR")
   isTriggered Boolean   @default(false)
   createdAt   DateTime  @default(now())
+
+  @@index([householdId])
+  @@index([productId])
 }
 
 model SavedProduct {
@@ -276,11 +334,9 @@ model SavedProduct {
   product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   notes       String?
   createdAt   DateTime  @default(now())
-}
 
-// ==========================================
-// PHASE 5 & PHASE 6 ENHANCED MODELS
-// ==========================================
+  @@index([householdId])
+}
 
 model OwnedProduct {
   id                 String    @id @default(uuid())
@@ -297,15 +353,19 @@ model OwnedProduct {
   serialNumber       String?
   purchaseDate       DateTime  @default(now())
   purchasePrice      Float     @default(0)
+  currency           String    @default("EUR")
   storeName          String?
   receiptUrl         String?
   manualUrl          String?
   warrantyMonths     Int       @default(12)
   warrantyExpiryDate DateTime?
-  repairHistoryJson  String?   // JSON array of service/repair logs
+  repairHistoryJson  String?
   notes              String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
+
+  @@index([householdId])
+  @@index([warrantyExpiryDate])
 }
 
 model Document {
@@ -315,15 +375,19 @@ model Document {
   uploadedById       String
   uploadedBy         User      @relation(fields: [uploadedById], references: [id])
   title              String
-  docType            String    @default("RECEIPT") // RECEIPT, INVOICE, WARRANTY, MANUAL, BILL, RENTAL, OTHER
+  docType            String    @default("RECEIPT")
   fileUrl            String?
   vendorName         String?
   amount             Float     @default(0)
+  currency           String    @default("EUR")
   docDate            DateTime  @default(now())
   warrantyExpiryDate DateTime?
   parsedText         String?
-  metadataJson       String?   // JSON metadata key-value pairs
+  metadataJson       String?
   createdAt          DateTime  @default(now())
+
+  @@index([householdId])
+  @@index([docType])
 }
 
 model AutomationConfig {
@@ -337,4 +401,59 @@ model AutomationConfig {
   unusualSpending     Boolean   @default(true)
   upcomingPayments    Boolean   @default(true)
   updatedAt           DateTime  @updatedAt
+}
+
+// ==========================================
+// RESEARCH EVALUATION & METRICS MODELS
+// ==========================================
+
+model ResearchMetric {
+  id          String    @id @default(uuid())
+  householdId String?
+  household   Household? @relation(fields: [householdId], references: [id], onDelete: SetNull)
+  category    String    // OCR, PREDICTION, OPTIMIZATION, RECOMMENDATION
+  metricName  String
+  metricValue Float
+  unit        String?
+  metadata    String?   // JSON object with additional context
+  createdAt   DateTime  @default(now())
+
+  @@index([category])
+  @@index([metricName])
+}
+
+model OcrEvaluationRecord {
+  id                   String    @id @default(uuid())
+  householdId          String
+  household            Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  receiptId            String?
+  receipt              Receipt?  @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  ocrConfidence        Float
+  rawText              String
+  extractedItemsCount  Int
+  correctedItemsCount  Int       @default(0)
+  itemAccuracyPercent  Float     @default(100.0)
+  storeCorrected       Boolean   @default(false)
+  totalAmountCorrected Boolean   @default(false)
+  createdAt            DateTime  @default(now())
+
+  @@index([householdId])
+}
+
+model PredictionEvaluationRecord {
+  id                     String    @id @default(uuid())
+  householdId            String
+  household              Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  productName            String
+  modelType              String    // BASELINE, IMPROVED
+  predictedDate          DateTime
+  actualPurchaseDate     DateTime?
+  errorDays              Float?
+  confidence             Float
+  suggestionAccepted     Boolean   @default(false)
+  historicalPointsCount  Int       @default(0)
+  createdAt              DateTime  @default(now())
+
+  @@index([householdId])
+  @@index([modelType])
 }

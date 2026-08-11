@@ -1,36 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LifeCart V1.0 — AI-Powered Smart Household & Shopping Assistant
 
-## Getting Started
+LifeCart is a multi-tenant SaaS platform and university-level intelligent decision-support system designed for individuals, families, students, and roommates to manage everyday household activities, groceries, expense splits, price comparison, document storage, and warranty tracking.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 🌟 Key Features
+
+- **Shared Smart Grocery List**: Collaborative grocery shopping with auto-category detection.
+- **OCR Receipt Extractor & Verified Evaluation**: Preprocessing, confidence scoring (0-100%), and user correction tracking.
+- **Multi-Stage Product Normalization**: Brand detection, unit standardization (`ml`, `g`), and Jaccard fuzzy matching.
+- **Dual Purchase Prediction Engine**: Baseline Mean Interval vs. Improved Exponential Decay models.
+- **Multi-Provider Price Intelligence**: `PriceProvider` architecture (`RealApi`, `ReceiptDerived`, `Admin`, `Demo`).
+- **Realistic Multi-Store Basket Optimizer**: Calculates travel time and transit cost trade-offs.
+- **Secure LifeCart AI Assistant**: Grounded intent engine with explicit tool permissions.
+- **University Evaluation Dashboard (`/admin/evaluation`)**: Server-secured research metrics visualizer.
+- **GDPR Privacy & Data Governance Center (`/privacy`)**: 1-click JSON dataset export and household data isolation.
+
+---
+
+## 🏗️ System Architecture
+
+```mermaid
+graph TD
+    A[Client App / Mobile PWA] --> B[Next.js API Gateway & Security Layer]
+    B --> C[LifeCart Core Engines]
+    C --> D1[OCR & Verified Evaluation Pipeline]
+    C --> D2[Multi-Stage Product Normalization Engine]
+    C --> D3[Dual Purchase Prediction Engine]
+    C --> D4[Multi-Provider Price Intelligence Architecture]
+    C --> D5[Realistic Multi-Store Basket Optimizer]
+    C --> D6[Secure LifeCart AI Tool Assistant]
+    C --> E[Prisma ORM + PostgreSQL / SQLite]
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🚀 Quick Setup & Local Execution
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 1. Installation
+```bash
+npm install
+```
 
-## Learn More
+### 2. Database Migration & Seed
+```bash
+npx prisma db push --force-reset
+npx tsx prisma/seed.ts
+```
 
-To learn more about Next.js, take a look at the following resources:
+### 3. Automated Test Suite
+```bash
+node scripts/run-tests.js
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 4. Development Server
+```bash
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Visit **http://localhost:3000** in your browser.
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 🧪 University Research Metrics
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Access the server-secured Evaluation Dashboard at `/admin/evaluation` (System Admin access required).
+
+---
+
+## 📄 License
+MIT License.

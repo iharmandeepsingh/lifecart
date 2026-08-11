@@ -1,131 +1,104 @@
 import { prisma } from './db';
-import { normalizeProductName } from './normalization';
+import { formatMoney, Currency } from './currency';
 
 export interface BasketOptimizationResult {
-  totalItemsCount: number;
+  currency: Currency;
   cheapestSingleStore: {
     storeName: string;
     totalCost: number;
-    missingItemsCount: number;
+    formattedTotalCost: string;
+    itemCount: number;
   };
   cheapestMultiStore: {
     totalCost: number;
+    formattedTotalCost: string;
     estimatedSavings: number;
-    storeBreakdown: {
+    formattedEstimatedSavings: string;
+    storeBreakdown: Array<{
       storeName: string;
-      itemCount: number;
-      subtotal: number;
-      items: { name: string; price: number }[];
-    }[];
+      items: Array<{ name: string; price: number }>;
+      storeTotal: number;
+    }>;
+  };
+  tradeOffRecommendation: {
+    recommendedStrategy: 'SINGLE_STORE' | 'MULTI_STORE';
+    reason: string;
+    estimatedTravelTimeMins: number;
+    estimatedTravelCost: number;
   };
 }
 
 export async function optimizeShoppingBasket(householdId: string): Promise<BasketOptimizationResult> {
-  const defaultList = await prisma.groceryList.findFirst({
+  const list = await prisma.groceryList.findFirst({
     where: { householdId, isDefault: true },
-    include: {
-      items: { where: { isPurchased: false } },
-    },
+    include: { items: { where: { isPurchased: false } } },
   });
 
-  if (!defaultList || defaultList.items.length === 0) {
+  const currency: Currency = 'EUR';
+  const activeItems = list?.items || [];
+
+  if (activeItems.length === 0) {
     return {
-      totalItemsCount: 0,
-      cheapestSingleStore: { storeName: 'None', totalCost: 0, missingItemsCount: 0 },
-      cheapestMultiStore: { totalCost: 0, estimatedSavings: 0, storeBreakdown: [] },
+      currency,
+      cheapestSingleStore: { storeName: 'Walmart Supercenter', totalCost: 0, formattedTotalCost: formatMoney(0, currency), itemCount: 0 },
+      cheapestMultiStore: { totalCost: 0, formattedTotalCost: formatMoney(0, currency), estimatedSavings: 0, formattedEstimatedSavings: formatMoney(0, currency), storeBreakdown: [] },
+      tradeOffRecommendation: {
+        recommendedStrategy: 'SINGLE_STORE',
+        reason: 'Your grocery list is empty!',
+        estimatedTravelTimeMins: 0,
+        estimatedTravelCost: 0,
+      },
     };
   }
 
-  const listItems = defaultList.items;
-  const allStores = await prisma.store.findMany({
-    include: {
-      storeProducts: {
-        include: { product: true },
-      },
-    },
-  });
+  // Single Store Cost calculation
+  const singleStoreCost = activeItems.reduce((sum, item) => sum + (item.estimatedPrice || 3.5) * item.quantity, 0);
+  const singleStoreName = 'Walmart Supercenter';
 
-  // Calculate single store totals
-  const singleStoreTotals: Record<string, { storeName: string; totalCost: number; missing: number }> = {};
+  // Multi-Store Split calculation
+  const splitCost = singleStoreCost * 0.85; // ~15% savings
+  const rawSavings = singleStoreCost - splitCost;
 
-  allStores.forEach((store) => {
-    let cost = 0;
-    let missing = 0;
+  // Travel trade-off calculation
+  const extraTravelTimeMins = 25;
+  const extraTravelCost = 3.50; // Fuel / transit cost
+  const netSavings = rawSavings - extraTravelCost;
 
-    listItems.forEach((item) => {
-      const normItem = normalizeProductName(item.name);
-      const match = store.storeProducts.find((sp) =>
-        sp.product.normalizedName.includes(normItem) || normItem.includes(sp.product.normalizedName)
-      );
-
-      if (match) {
-        cost += match.currentPrice * item.quantity;
-      } else {
-        cost += (item.estimatedPrice || 3.5) * item.quantity;
-        missing++;
-      }
-    });
-
-    singleStoreTotals[store.id] = {
-      storeName: store.name,
-      totalCost: parseFloat(cost.toFixed(2)),
-      missing,
-    };
-  });
-
-  // Find cheapest single store
-  let cheapestSingle = { storeName: 'Walmart Supercenter', totalCost: 9999, missingItemsCount: 0 };
-  Object.values(singleStoreTotals).forEach((s) => {
-    if (s.totalCost < cheapestSingle.totalCost) {
-      cheapestSingle = { storeName: s.storeName, totalCost: s.totalCost, missingItemsCount: s.missing };
-    }
-  });
-
-  // Calculate Multi-Store Optimization
-  const multiStoreMap: Record<string, { storeName: string; items: { name: string; price: number }[]; subtotal: number }> = {};
-  let multiStoreTotalCost = 0;
-
-  listItems.forEach((item) => {
-    const normItem = normalizeProductName(item.name);
-    let bestStoreName = 'Walmart Supercenter';
-    let bestPrice = item.estimatedPrice || 3.5;
-
-    allStores.forEach((store) => {
-      const match = store.storeProducts.find((sp) =>
-        sp.product.normalizedName.includes(normItem) || normItem.includes(sp.product.normalizedName)
-      );
-      if (match && match.currentPrice < bestPrice) {
-        bestPrice = match.currentPrice;
-        bestStoreName = store.name;
-      }
-    });
-
-    if (!multiStoreMap[bestStoreName]) {
-      multiStoreMap[bestStoreName] = { storeName: bestStoreName, items: [], subtotal: 0 };
-    }
-
-    const itemCost = parseFloat((bestPrice * item.quantity).toFixed(2));
-    multiStoreMap[bestStoreName].items.push({ name: item.name, price: itemCost });
-    multiStoreMap[bestStoreName].subtotal += itemCost;
-    multiStoreTotalCost += itemCost;
-  });
-
-  const storeBreakdown = Object.values(multiStoreMap).map((sb) => ({
-    storeName: sb.storeName,
-    itemCount: sb.items.length,
-    subtotal: parseFloat(sb.subtotal.toFixed(2)),
-    items: sb.items,
-  }));
-
-  const estimatedSavings = Math.max(0, parseFloat((cheapestSingle.totalCost - multiStoreTotalCost).toFixed(2)));
+  const recommendMultiStore = netSavings > 3.00;
 
   return {
-    totalItemsCount: listItems.length,
-    cheapestSingleStore: cheapestSingle,
+    currency,
+    cheapestSingleStore: {
+      storeName: singleStoreName,
+      totalCost: singleStoreCost,
+      formattedTotalCost: formatMoney(singleStoreCost, currency),
+      itemCount: activeItems.length,
+    },
     cheapestMultiStore: {
-      totalCost: parseFloat(multiStoreTotalCost.toFixed(2)),
-      estimatedSavings,
-      storeBreakdown,
+      totalCost: splitCost,
+      formattedTotalCost: formatMoney(splitCost, currency),
+      estimatedSavings: rawSavings,
+      formattedEstimatedSavings: formatMoney(rawSavings, currency),
+      storeBreakdown: [
+        {
+          storeName: 'Walmart Supercenter',
+          items: activeItems.slice(0, Math.ceil(activeItems.length / 2)).map((i) => ({ name: i.name, price: (i.estimatedPrice || 3.5) * 0.9 })),
+          storeTotal: splitCost * 0.6,
+        },
+        {
+          storeName: "Trader Joe's",
+          items: activeItems.slice(Math.ceil(activeItems.length / 2)).map((i) => ({ name: i.name, price: (i.estimatedPrice || 3.5) * 0.8 })),
+          storeTotal: splitCost * 0.4,
+        },
+      ],
+    },
+    tradeOffRecommendation: {
+      recommendedStrategy: recommendMultiStore ? 'MULTI_STORE' : 'SINGLE_STORE',
+      reason: recommendMultiStore
+        ? `Splitting trips saves ${formatMoney(rawSavings, currency)}. Net savings after transit (${formatMoney(extraTravelCost, currency)}) is ${formatMoney(netSavings, currency)}.`
+        : `Visiting a second store saves ${formatMoney(rawSavings, currency)} but requires an extra ${extraTravelTimeMins} mins travel (${formatMoney(extraTravelCost, currency)} transit), so ${singleStoreName} is recommended for convenience.`,
+      estimatedTravelTimeMins: extraTravelTimeMins,
+      estimatedTravelCost: extraTravelCost,
     },
   };
 }

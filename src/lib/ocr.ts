@@ -1,136 +1,126 @@
+import { categorizeItem } from './normalization';
+import { prisma } from './db';
+
+export { categorizeItem };
+
 export interface ExtractedReceiptItem {
   name: string;
   category: string;
   price: number;
   quantity: number;
+  confidence: number;
 }
 
 export interface ExtractedReceiptData {
   storeName: string;
+  storeConfidence: number;
   receiptDate: string;
+  dateConfidence: number;
   totalAmount: number;
+  totalConfidence: number;
   taxAmount: number;
   items: ExtractedReceiptItem[];
-  rawText: string;
+  overallConfidence: number;
 }
 
-// Categorizes receipt items based on common food/grocery item keywords
-export function categorizeItem(name: string): string {
-  const lower = name.toLowerCase();
-  
-  if (/\b(apple|banana|orange|tomato|onion|potato|avocado|lettuce|berry|berries|grape|fruit|veg|carrot|salad|spinach|garlic|lemon|lime)\b/.test(lower)) {
-    return 'PRODUCE';
-  }
-  if (/\b(milk|cheese|yogurt|butter|cream|egg|eggs|margarine|cheddar|mozzarella|parmesan)\b/.test(lower)) {
-    return 'DAIRY';
-  }
-  if (/\b(chicken|beef|pork|steak|turkey|salmon|tuna|fish|bacon|sausage|meat|shrimp|ground)\b/.test(lower)) {
-    return 'MEAT';
-  }
-  if (/\b(paper|towel|soap|detergent|cleaner|tissue|bag|trash|sponge|wipes|dish|clean)\b/.test(lower)) {
-    return 'HOUSEHOLD';
-  }
-  if (/\b(shampoo|deodorant|toothpaste|soap|lotion|razor|brush|cream|vitamin|bath)\b/.test(lower)) {
-    return 'PERSONAL';
-  }
-  if (/\b(bread|cereal|pasta|rice|flour|sugar|oil|sauce|can|canned|soup|chips|snack|cookie|cracker|coffee|tea)\b/.test(lower)) {
-    return 'PANTRY';
-  }
-  
-  return 'GROCERY';
-}
+export function parseReceiptTextWithConfidence(text: string): ExtractedReceiptData {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
 
-export function parseReceiptText(text: string): ExtractedReceiptData {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  
   let storeName = 'Grocery Store';
-  let totalAmount = 0;
-  let taxAmount = 0;
+  let storeConfidence = 70;
   let receiptDate = new Date().toISOString().split('T')[0];
+  let dateConfidence = 75;
+  let totalAmount = 0;
+  let totalConfidence = 80;
+  let taxAmount = 0;
   const items: ExtractedReceiptItem[] = [];
 
-  // Try to find Store Name (usually first non-empty lines)
-  for (let i = 0; i < Math.min(lines.length, 5); i++) {
+  for (let i = 0; i < Math.min(3, lines.length); i++) {
     const line = lines[i];
-    if (/walmart|target|costco|trader joe|kroger|safeway|whole foods|aldi|h-e-b|publix|market|mart|store/i.test(line)) {
-      storeName = line.replace(/[^a-zA-Z0-9\s&'-]/g, '').trim();
-      break;
-    } else if (i === 0 && line.length > 2 && !/\$|\d{3}/.test(line)) {
-      storeName = line.replace(/[^a-zA-Z0-9\s&'-]/g, '').trim();
+    if (line.includes('WALMART')) { storeName = 'Walmart Supercenter'; storeConfidence = 98; }
+    else if (line.includes('TRADER JOE')) { storeName = "Trader Joe's"; storeConfidence = 98; }
+    else if (line.includes('TARGET')) { storeName = 'Target'; storeConfidence = 95; }
+    else if (line.includes('COSTCO')) { storeName = 'Costco Wholesale'; storeConfidence = 98; }
+    else if (line.length > 3 && !line.includes('DATE') && !line.includes('RECEIPT')) {
+      storeName = line.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+      storeConfidence = 75;
     }
   }
 
-  // Regex patterns
-  const dateRegex = /\b(\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{2,4})\b/;
-  const priceRegex = /\$?(\d+\.\d{2})\b/;
-  const totalRegex = /\b(total|balance|amount due|grand total)\b/i;
-  const taxRegex = /\b(tax|sales tax|vat)\b/i;
+  const priceRegex = /(\$?(\d+\.\d{2}))/;
+  const dateRegex = /(\d{1,2}\/\d{1,2}\/\d{2,4})/;
 
-  lines.forEach(line => {
-    // Check Date
+  for (const line of lines) {
     const dateMatch = line.match(dateRegex);
-    if (dateMatch && dateMatch[1]) {
+    if (dateMatch) {
       try {
-        const d = new Date(dateMatch[1]);
-        if (!isNaN(d.getTime())) {
-          receiptDate = d.toISOString().split('T')[0];
+        const parsed = new Date(dateMatch[1]);
+        if (!isNaN(parsed.getTime())) {
+          receiptDate = parsed.toISOString().split('T')[0];
+          dateConfidence = 95;
         }
-      } catch {
-        // Fallback to default date
+      } catch (err) {
+        // fallback
       }
     }
 
-    // Check Tax
-    if (taxRegex.test(line)) {
-      const priceMatch = line.match(priceRegex);
-      if (priceMatch) {
-        taxAmount = parseFloat(priceMatch[1]);
-      }
-      return;
-    }
-
-    // Check Total Amount
-    if (totalRegex.test(line)) {
-      const priceMatch = line.match(priceRegex);
-      if (priceMatch) {
-        totalAmount = Math.max(totalAmount, parseFloat(priceMatch[1]));
-      }
-      return;
-    }
-
-    // Parse Line Items: usually "Item Description $XX.XX" or "Item Description XX.XX"
     const priceMatch = line.match(priceRegex);
-    if (priceMatch && !/subtotal|total|change|cash|card|visa|mastercard|tax|savings|discount/i.test(line)) {
-      const price = parseFloat(priceMatch[1]);
-      let name = line.substring(0, priceMatch.index).trim();
-      
-      // Clean up item name
-      name = name.replace(/^[\d\*\s\-]+/, '').replace(/[\*\$]/g, '').trim();
-      
-      if (name.length >= 2 && price > 0 && price < 500) {
-        const category = categorizeItem(name);
-        items.push({
-          name: name.charAt(0).toUpperCase() + name.slice(1).toLowerCase(),
-          category,
-          price,
-          quantity: 1,
-        });
+    if (priceMatch) {
+      const val = parseFloat(priceMatch[2]);
+      if (line.toUpperCase().includes('TOTAL') && !line.toUpperCase().includes('SUBTOTAL')) {
+        totalAmount = val;
+        totalConfidence = 95;
+      } else if (line.toUpperCase().includes('TAX')) {
+        taxAmount = val;
+      } else if (!line.toUpperCase().includes('SUBTOTAL') && !line.toUpperCase().includes('CHANGE') && val > 0 && val < 500) {
+        const itemName = line.replace(priceRegex, '').replace(/[^a-zA-Z0-9\s]/g, '').trim();
+        if (itemName.length > 2) {
+          const cat = categorizeItem(itemName);
+          items.push({
+            name: itemName,
+            category: cat,
+            price: val,
+            quantity: 1,
+            confidence: val > 0.5 ? 90 : 65,
+          });
+        }
       }
     }
-  });
-
-  // If total wasn't found explicitly, calculate from sum of items + tax
-  if (totalAmount === 0 && items.length > 0) {
-    const itemSum = items.reduce((sum, item) => sum + item.price, 0);
-    totalAmount = parseFloat((itemSum + taxAmount).toFixed(2));
   }
+
+  const overallConfidence = Math.round((storeConfidence + dateConfidence + totalConfidence) / 3);
 
   return {
     storeName,
+    storeConfidence,
     receiptDate,
+    dateConfidence,
     totalAmount,
+    totalConfidence,
     taxAmount,
     items,
-    rawText: text,
+    overallConfidence,
   };
+}
+
+export function parseReceiptText(text: string): ExtractedReceiptData {
+  return parseReceiptTextWithConfidence(text);
+}
+
+export async function logOcrEvaluationRecord(householdId: string, receiptId: string, data: ExtractedReceiptData, correctedCount: number = 0) {
+  try {
+    await prisma.ocrEvaluationRecord.create({
+      data: {
+        householdId,
+        receiptId,
+        ocrConfidence: data.overallConfidence,
+        rawText: `${data.storeName} Total: ${data.totalAmount}`,
+        extractedItemsCount: data.items.length,
+        correctedItemsCount: correctedCount,
+        itemAccuracyPercent: data.items.length > 0 ? ((data.items.length - correctedCount) / data.items.length) * 100 : 100,
+      },
+    });
+  } catch (err) {
+    console.error('Failed to log OCR evaluation:', err);
+  }
 }
