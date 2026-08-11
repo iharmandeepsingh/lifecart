@@ -10,14 +10,41 @@ import {
   ArrowDownLeft, 
   Sparkles,
   Trash2,
-  X
+  X,
+  CheckCircle2
 } from 'lucide-react';
+
+const DEFAULT_5_MEMBERS = [
+  { userId: 'user-harman', user: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' } },
+  { userId: 'user-raj', user: { id: 'user-raj', name: 'Raj', email: 'raj@lifecart.com' } },
+  { userId: 'user-simar', user: { id: 'user-simar', name: 'Simar', email: 'simar@lifecart.com' } },
+  { userId: 'user-asis', user: { id: 'user-asis', name: 'Asis', email: 'asis@lifecart.com' } },
+  { userId: 'user-arman', user: { id: 'user-arman', name: 'Arman', email: 'arman@lifecart.com' } },
+];
+
+const INITIAL_EXPENSES = [
+  {
+    id: 'exp-seed-1',
+    title: 'Weekly Supermarket Grocery Run',
+    amount: 100.00,
+    category: 'GROCERY',
+    date: new Date().toISOString(),
+    paidBy: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' },
+    splits: [
+      { userId: 'user-harman', amount: 20.00, isSettled: true },
+      { userId: 'user-raj', amount: 20.00, isSettled: false },
+      { userId: 'user-simar', amount: 20.00, isSettled: false },
+      { userId: 'user-asis', amount: 20.00, isSettled: false },
+      { userId: 'user-arman', amount: 20.00, isSettled: false },
+    ],
+  },
+];
 
 export default function ExpensesView() {
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [members, setMembers] = useState<any[]>([]);
-  const [expenses, setExpenses] = useState<any[]>([]);
-  const [balances, setBalances] = useState<Record<string, number>>({});
+  const [members, setMembers] = useState<any[]>(DEFAULT_5_MEMBERS);
+  const [expenses, setExpenses] = useState<any[]>(INITIAL_EXPENSES);
+  const [settledUserIds, setSettledUserIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [settlingUserId, setSettlingUserId] = useState<string | null>(null);
@@ -28,7 +55,7 @@ export default function ExpensesView() {
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('GROCERY');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [paidById, setPaidById] = useState('');
+  const [paidById, setPaidById] = useState('user-harman');
 
   useEffect(() => {
     fetchData();
@@ -42,34 +69,49 @@ export default function ExpensesView() {
 
       const expRes = await fetch('/api/expenses');
       const expData = await expRes.json();
-      if (expData.expenses) setExpenses(expData.expenses);
-      if (expData.balances) setBalances(expData.balances);
-      if (expData.members) {
+      if (expData.expenses && expData.expenses.length > 0) {
+        setExpenses(expData.expenses);
+      }
+      if (expData.members && expData.members.length > 0) {
         setMembers(expData.members);
-        if (expData.members.length > 0) {
-          setPaidById(expData.members[0].userId);
-        }
       }
     } catch (err) {
-      console.error(err);
+      console.error('Fetch expenses error:', err);
     } finally {
       setLoading(false);
     }
   };
+
+  // Compute live member balances dynamically from expenses array
+  const calculateBalances = () => {
+    const balMap: Record<string, number> = {};
+    members.forEach((m) => {
+      balMap[m.userId] = 0;
+    });
+
+    expenses.forEach((exp) => {
+      const payerId = exp.paidBy?.id || exp.paidById || 'user-harman';
+      const splits = exp.splits || [];
+
+      splits.forEach((s: any) => {
+        if (!s.isSettled && s.userId !== payerId && !settledUserIds.has(s.userId)) {
+          balMap[s.userId] = (balMap[s.userId] || 0) - s.amount;
+          balMap[payerId] = (balMap[payerId] || 0) + s.amount;
+        }
+      });
+    });
+
+    return balMap;
+  };
+
+  const computedBalances = calculateBalances();
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     const numAmount = parseFloat(amount);
     if (!title.trim() || isNaN(numAmount) || numAmount <= 0) return;
 
-    const activeMembers = members.length > 0 ? members : [
-      { userId: 'user-harman', user: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' } },
-      { userId: 'user-raj', user: { id: 'user-raj', name: 'Raj', email: 'raj@lifecart.com' } },
-      { userId: 'user-simar', user: { id: 'user-simar', name: 'Simar', email: 'simar@lifecart.com' } },
-      { userId: 'user-asis', user: { id: 'user-asis', name: 'Asis', email: 'asis@lifecart.com' } },
-      { userId: 'user-arman', user: { id: 'user-arman', name: 'Arman', email: 'arman@lifecart.com' } },
-    ];
-
+    const activeMembers = members.length > 0 ? members : DEFAULT_5_MEMBERS;
     const perMemberAmount = parseFloat((numAmount / activeMembers.length).toFixed(2));
     const selectedPayer = activeMembers.find((m) => m.userId === paidById) || activeMembers[0];
 
@@ -78,7 +120,7 @@ export default function ExpensesView() {
       title: title.trim(),
       amount: numAmount,
       category,
-      date: new Date(date),
+      date: new Date(date).toISOString(),
       paidBy: { id: selectedPayer.userId, name: selectedPayer.user?.name || 'Harman', email: selectedPayer.user?.email || 'harman@lifecart.com' },
       splits: activeMembers.map((m) => ({
         userId: m.userId,
@@ -90,7 +132,7 @@ export default function ExpensesView() {
 
     setExpenses((prev) => [newExpense, ...prev]);
     setIsModalOpen(false);
-    showToast(`Added $${numAmount.toFixed(2)} manual expense paid by ${selectedPayer.user?.name || 'Harman'}!`);
+    showToast(`Added "$${numAmount.toFixed(2)}" expense paid by ${selectedPayer.user?.name || 'Harman'}!`);
 
     // Reset Form
     setTitle('');
@@ -109,37 +151,33 @@ export default function ExpensesView() {
           splits: activeMembers.map((m) => ({ userId: m.userId, amount: perMemberAmount })),
         }),
       });
-      fetchData();
     } catch (err) {
-      console.error('Failed to add manual expense:', err);
+      console.error('API create expense error:', err);
     }
   };
 
   const handleDeleteExpense = async (expenseId: string) => {
     setExpenses((prev) => prev.filter((e) => e.id !== expenseId));
-    showToast('Expense removed successfully');
+    showToast('Expense removed cleanly!');
 
     try {
       await fetch(`/api/expenses?id=${expenseId}`, { method: 'DELETE' });
-      fetchData();
     } catch (err) {
-      console.error('Failed to delete expense:', err);
+      console.error('API delete expense error:', err);
     }
   };
 
-  const handleSettleUp = async (targetUserId: string) => {
+  const handleSettleUp = async (targetUserId: string, targetName: string) => {
     setSettlingUserId(targetUserId);
+    setSettledUserIds((prev) => new Set(prev).add(targetUserId));
+    showToast(`Settled up all balances with ${targetName}!`);
+
     try {
-      const res = await fetch('/api/expenses/settle', {
+      await fetch('/api/expenses/settle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetUserId }),
       });
-
-      if (res.ok) {
-        showToast('Settled up successfully!');
-        fetchData();
-      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -154,9 +192,11 @@ export default function ExpensesView() {
 
   return (
     <div className="space-y-8">
+      {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-[100] bg-emerald-500 text-slate-950 font-bold px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2 animate-bounce border border-emerald-400">
-          <Sparkles className="w-5 h-5 text-slate-950" /> {toastMessage}
+        <div className="fixed bottom-6 right-6 z-[100] bg-emerald-500 text-slate-950 font-bold px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-2.5 animate-bounce border border-emerald-400">
+          <Sparkles className="w-5 h-5 text-slate-950" />
+          <span>{toastMessage}</span>
         </div>
       )}
 
@@ -182,18 +222,18 @@ export default function ExpensesView() {
       {/* Member Balances Section */}
       <div className="space-y-4">
         <h2 className="text-lg font-bold text-white flex items-center gap-2">
-          <Users className="w-5 h-5 text-emerald-400" /> Member Balances & Settlements (5 Members)
+          <Users className="w-5 h-5 text-emerald-400" /> Member Balances & Settlement ({members.length} Members)
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {members.map((m) => {
-            const bal = balances[m.userId] || 0;
-            const isMe = m.userId === currentUser?.id || m.user.name === 'Harman';
+            const bal = computedBalances[m.userId] || 0;
+            const isMe = m.user.name === 'Harman' || m.userId === currentUser?.id;
 
             return (
               <div
                 key={m.userId}
-                className="glass-card p-5 rounded-2xl border border-slate-800 flex items-center justify-between gap-4"
+                className="glass-card p-5 rounded-2xl border border-slate-800 flex items-center justify-between gap-4 transition-all hover:border-slate-700"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-xl gradient-bg flex items-center justify-center text-white text-lg font-bold shadow-md shadow-emerald-500/20">
@@ -201,19 +241,21 @@ export default function ExpensesView() {
                   </div>
                   <div>
                     <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                      {m.user.name} {isMe && <span className="text-[10px] text-emerald-400 font-semibold">(You)</span>}
+                      {m.user.name} {isMe && <span className="text-[10px] text-emerald-400 font-semibold">(Admin)</span>}
                     </div>
-                    <div className="text-xs text-slate-400">
+                    <div className="text-xs text-slate-400 mt-0.5">
                       {bal > 0 ? (
-                        <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                        <span className="text-emerald-400 font-bold flex items-center gap-1">
                           <ArrowUpRight className="w-3.5 h-3.5" /> Is owed ${bal.toFixed(2)}
                         </span>
                       ) : bal < 0 ? (
-                        <span className="text-rose-400 font-semibold flex items-center gap-1">
+                        <span className="text-rose-400 font-bold flex items-center gap-1">
                           <ArrowDownLeft className="w-3.5 h-3.5" /> Owes ${Math.abs(bal).toFixed(2)}
                         </span>
                       ) : (
-                        <span className="text-slate-500">Settled up</span>
+                        <span className="text-emerald-400/80 font-semibold flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Settled up
+                        </span>
                       )}
                     </div>
                   </div>
@@ -222,9 +264,9 @@ export default function ExpensesView() {
                 {!isMe && bal !== 0 && (
                   <button
                     type="button"
-                    onClick={() => handleSettleUp(m.userId)}
+                    onClick={() => handleSettleUp(m.userId, m.user.name)}
                     disabled={settlingUserId === m.userId}
-                    className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer"
+                    className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold px-3 py-2 rounded-xl transition-all cursor-pointer hover:scale-105"
                   >
                     {settlingUserId === m.userId ? 'Settling...' : 'Settle Up'}
                   </button>
@@ -235,11 +277,14 @@ export default function ExpensesView() {
         </div>
       </div>
 
-      {/* Recent Expenses Table */}
+      {/* Household Expense List */}
       <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2">
-          <DollarSign className="w-5 h-5 text-emerald-400" /> Household Expenses List
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+            <DollarSign className="w-5 h-5 text-emerald-400" /> Household Expense List ({expenses.length})
+          </h2>
+          <span className="text-xs text-slate-400">Click Trash icon to remove any expense</span>
+        </div>
 
         {loading ? (
           <div className="space-y-3">
@@ -289,10 +334,10 @@ export default function ExpensesView() {
                   <button
                     type="button"
                     onClick={() => handleDeleteExpense(expense.id)}
-                    title="Remove Expense"
+                    title="Delete Expense"
                     className="p-2 text-slate-500 hover:text-rose-400 hover:bg-slate-800/80 rounded-lg transition-colors cursor-pointer"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-4.5 h-4.5" />
                   </button>
                 </div>
               </div>
@@ -301,7 +346,7 @@ export default function ExpensesView() {
         )}
       </div>
 
-      {/* Add Expense Modal */}
+      {/* Add Manual Expense Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="glass-panel w-full max-w-md p-6 rounded-2xl border border-slate-800 shadow-2xl space-y-4 relative">
@@ -327,7 +372,7 @@ export default function ExpensesView() {
                   autoFocus
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Electric Bill, Internet, Grocery Run"
+                  placeholder="e.g. Electric Bill, Grocery Run, Dinner"
                   className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
                 />
               </div>
