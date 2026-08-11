@@ -8,7 +8,9 @@ import {
   Users, 
   ArrowUpRight, 
   ArrowDownLeft, 
-  Sparkles
+  Sparkles,
+  Trash2,
+  X
 } from 'lucide-react';
 
 export default function ExpensesView() {
@@ -26,6 +28,7 @@ export default function ExpensesView() {
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('GROCERY');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [paidById, setPaidById] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -41,7 +44,12 @@ export default function ExpensesView() {
       const expData = await expRes.json();
       if (expData.expenses) setExpenses(expData.expenses);
       if (expData.balances) setBalances(expData.balances);
-      if (expData.members) setMembers(expData.members);
+      if (expData.members) {
+        setMembers(expData.members);
+        if (expData.members.length > 0) {
+          setPaidById(expData.members[0].userId);
+        }
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -51,37 +59,71 @@ export default function ExpensesView() {
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !amount) return;
-
     const numAmount = parseFloat(amount);
-    const perMemberAmount = members.length > 0 ? parseFloat((numAmount / members.length).toFixed(2)) : numAmount;
-    const splits = members.map((m) => ({
-      userId: m.userId,
-      amount: perMemberAmount,
-    }));
+    if (!title.trim() || isNaN(numAmount) || numAmount <= 0) return;
+
+    const activeMembers = members.length > 0 ? members : [
+      { userId: 'user-harman', user: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' } },
+      { userId: 'user-raj', user: { id: 'user-raj', name: 'Raj', email: 'raj@lifecart.com' } },
+      { userId: 'user-simar', user: { id: 'user-simar', name: 'Simar', email: 'simar@lifecart.com' } },
+      { userId: 'user-asis', user: { id: 'user-asis', name: 'Asis', email: 'asis@lifecart.com' } },
+      { userId: 'user-arman', user: { id: 'user-arman', name: 'Arman', email: 'arman@lifecart.com' } },
+    ];
+
+    const perMemberAmount = parseFloat((numAmount / activeMembers.length).toFixed(2));
+    const selectedPayer = activeMembers.find((m) => m.userId === paidById) || activeMembers[0];
+
+    const newExpense = {
+      id: `exp-${Date.now()}`,
+      title: title.trim(),
+      amount: numAmount,
+      category,
+      date: new Date(date),
+      paidBy: { id: selectedPayer.userId, name: selectedPayer.user?.name || 'Harman', email: selectedPayer.user?.email || 'harman@lifecart.com' },
+      splits: activeMembers.map((m) => ({
+        userId: m.userId,
+        amount: perMemberAmount,
+        isSettled: m.userId === selectedPayer.userId,
+        user: { name: m.user?.name || m.userId },
+      })),
+    };
+
+    setExpenses((prev) => [newExpense, ...prev]);
+    setIsModalOpen(false);
+    showToast(`Added $${numAmount.toFixed(2)} manual expense paid by ${selectedPayer.user?.name || 'Harman'}!`);
+
+    // Reset Form
+    setTitle('');
+    setAmount('');
 
     try {
-      const res = await fetch('/api/expenses', {
+      await fetch('/api/expenses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title,
+          title: title.trim(),
           amount: numAmount,
           category,
           date,
-          splits,
+          paidById: selectedPayer.userId,
+          splits: activeMembers.map((m) => ({ userId: m.userId, amount: perMemberAmount })),
         }),
       });
-
-      if (res.ok) {
-        showToast('Expense added and split equally!');
-        setIsModalOpen(false);
-        setTitle('');
-        setAmount('');
-        fetchData();
-      }
+      fetchData();
     } catch (err) {
-      console.error(err);
+      console.error('Failed to add manual expense:', err);
+    }
+  };
+
+  const handleDeleteExpense = async (expenseId: string) => {
+    setExpenses((prev) => prev.filter((e) => e.id !== expenseId));
+    showToast('Expense removed successfully');
+
+    try {
+      await fetch(`/api/expenses?id=${expenseId}`, { method: 'DELETE' });
+      fetchData();
+    } catch (err) {
+      console.error('Failed to delete expense:', err);
     }
   };
 
@@ -107,14 +149,14 @@ export default function ExpensesView() {
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 3000);
+    setTimeout(() => setToastMessage(''), 3500);
   };
 
   return (
     <div className="space-y-8">
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-slate-950 font-semibold px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 animate-bounce">
-          <Sparkles className="w-5 h-5" /> {toastMessage}
+        <div className="fixed bottom-6 right-6 z-[100] bg-emerald-500 text-slate-950 font-bold px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2 animate-bounce border border-emerald-400">
+          <Sparkles className="w-5 h-5 text-slate-950" /> {toastMessage}
         </div>
       )}
 
@@ -129,8 +171,9 @@ export default function ExpensesView() {
         </div>
 
         <button
+          type="button"
           onClick={() => setIsModalOpen(true)}
-          className="gradient-bg gradient-bg-hover text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2"
+          className="gradient-bg gradient-bg-hover text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2 cursor-pointer hover:scale-105"
         >
           <Plus className="w-4 h-4" /> Add Manual Expense
         </button>
@@ -139,13 +182,13 @@ export default function ExpensesView() {
       {/* Member Balances Section */}
       <div className="space-y-4">
         <h2 className="text-lg font-bold text-white flex items-center gap-2">
-          <Users className="w-5 h-5 text-emerald-400" /> Member Balances & Settlements
+          <Users className="w-5 h-5 text-emerald-400" /> Member Balances & Settlements (5 Members)
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {members.map((m) => {
             const bal = balances[m.userId] || 0;
-            const isMe = m.userId === currentUser?.id;
+            const isMe = m.userId === currentUser?.id || m.user.name === 'Harman';
 
             return (
               <div
@@ -178,9 +221,10 @@ export default function ExpensesView() {
 
                 {!isMe && bal !== 0 && (
                   <button
+                    type="button"
                     onClick={() => handleSettleUp(m.userId)}
                     disabled={settlingUserId === m.userId}
-                    className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold px-3 py-2 rounded-xl transition-colors"
+                    className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer"
                   >
                     {settlingUserId === m.userId ? 'Settling...' : 'Settle Up'}
                   </button>
@@ -194,7 +238,7 @@ export default function ExpensesView() {
       {/* Recent Expenses Table */}
       <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4">
         <h2 className="text-lg font-bold text-white flex items-center gap-2">
-          <DollarSign className="w-5 h-5 text-emerald-400" /> Recent Household Expenses
+          <DollarSign className="w-5 h-5 text-emerald-400" /> Household Expenses List
         </h2>
 
         {loading ? (
@@ -208,7 +252,7 @@ export default function ExpensesView() {
             <PieChartIcon className="w-12 h-12 text-slate-600 mx-auto" />
             <div className="text-slate-300 font-semibold text-sm">No expenses logged yet</div>
             <div className="text-xs text-slate-500 max-w-xs mx-auto">
-              Scan a receipt or add a manual expense to start tracking household split costs.
+              Scan a receipt or click "Add Manual Expense" to split costs across Harman, Raj, Simar, Asis, and Arman.
             </div>
           </div>
         ) : (
@@ -216,29 +260,40 @@ export default function ExpensesView() {
             {expenses.map((expense) => (
               <div
                 key={expense.id}
-                className="glass-card p-4 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                className="glass-card p-4 rounded-xl border border-slate-800 flex items-center justify-between gap-4 transition-all hover:border-slate-700"
               >
-                <div className="flex items-center gap-3.5">
-                  <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-emerald-400 font-bold">
+                <div className="flex items-center gap-3.5 flex-1 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-emerald-400 font-bold shrink-0">
                     <DollarSign className="w-5 h-5" />
                   </div>
-                  <div>
-                    <div className="font-semibold text-slate-100 text-sm">{expense.title}</div>
-                    <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-slate-100 text-sm truncate">{expense.title}</div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mt-0.5">
                       <span className="bg-slate-800 px-2 py-0.5 rounded text-slate-300 font-mono text-[10px]">
                         {expense.category}
                       </span>
-                      <span>Paid by {expense.paidBy.name}</span>
+                      <span>Paid by <strong className="text-slate-200">{expense.paidBy?.name || 'Harman'}</strong></span>
                       <span>• {new Date(expense.date).toLocaleDateString()}</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="text-right">
-                  <div className="text-base font-bold text-emerald-400">${expense.amount.toFixed(2)}</div>
-                  <div className="text-[11px] text-slate-500">
-                    Split ({expense.splits.length} members)
+                <div className="flex items-center gap-4 shrink-0">
+                  <div className="text-right">
+                    <div className="text-base font-bold text-emerald-400">${Number(expense.amount).toFixed(2)}</div>
+                    <div className="text-[11px] text-slate-500">
+                      Split ({expense.splits?.length || 5} members)
+                    </div>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteExpense(expense.id)}
+                    title="Remove Expense"
+                    className="p-2 text-slate-500 hover:text-rose-400 hover:bg-slate-800/80 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             ))}
@@ -248,11 +303,20 @@ export default function ExpensesView() {
 
       {/* Add Expense Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-panel w-full max-w-md p-6 rounded-2xl border border-slate-800 shadow-2xl space-y-4">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Plus className="w-5 h-5 text-emerald-400" /> Add Manual Expense
-            </h2>
+        <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="glass-panel w-full max-w-md p-6 rounded-2xl border border-slate-800 shadow-2xl space-y-4 relative">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Plus className="w-5 h-5 text-emerald-400" /> Add Manual Expense
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
             <form onSubmit={handleAddExpense} className="space-y-4">
               <div>
@@ -260,9 +324,10 @@ export default function ExpensesView() {
                 <input
                   type="text"
                   required
+                  autoFocus
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Electric Bill, Internet, Costco Run"
+                  placeholder="e.g. Electric Bill, Internet, Grocery Run"
                   className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
                 />
               </div>
@@ -276,7 +341,7 @@ export default function ExpensesView() {
                     required
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
-                    placeholder="45.00"
+                    placeholder="50.00"
                     className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
@@ -297,7 +362,22 @@ export default function ExpensesView() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Date</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Paid By Member</label>
+                <select
+                  value={paidById}
+                  onChange={(e) => setPaidById(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
+                >
+                  {members.map((m) => (
+                    <option key={m.userId} value={m.userId}>
+                      {m.user.name} ({m.user.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Expense Date</label>
                 <input
                   type="date"
                   value={date}
@@ -310,15 +390,15 @@ export default function ExpensesView() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-sm text-slate-400 hover:text-white"
+                  className="px-4 py-2 text-sm text-slate-400 hover:text-white cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="gradient-bg text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-lg shadow-emerald-500/20"
+                  className="gradient-bg text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 hover:scale-105 transition-all cursor-pointer"
                 >
-                  Add & Split
+                  Add & Split Expense
                 </button>
               </div>
             </form>

@@ -70,7 +70,7 @@ export async function GET() {
         },
       ],
       balances: {
-        'user-harman': 80.00, // Harman paid $100, receives $80 from 4 members
+        'user-harman': 80.00,
         'user-raj': -20.00,
         'user-simar': -20.00,
         'user-asis': -20.00,
@@ -85,10 +85,9 @@ export async function POST(req: Request) {
   try {
     const user = await getCurrentUser();
     const householdId = user?.householdId || 'demo-household-id-1';
-    const paidById = user?.id || 'user-harman';
 
     const body = await req.json().catch(() => ({}));
-    const { title, amount, category, date, splits } = body;
+    const { title, amount, category, date, paidById, splits } = body;
 
     if (!title || !amount) {
       return NextResponse.json({ error: 'Title and amount are required' }, { status: 400 });
@@ -96,12 +95,13 @@ export async function POST(req: Request) {
 
     const cleanTitle = String(title).trim();
     const cleanAmount = Number(amount) || 0;
+    const effectivePaidById = paidById || user?.id || 'user-harman';
 
     try {
       const expense = await prisma.expense.create({
         data: {
           householdId,
-          paidById,
+          paidById: effectivePaidById,
           title: cleanTitle,
           amount: cleanAmount,
           category: category || 'GROCERY',
@@ -110,8 +110,8 @@ export async function POST(req: Request) {
             create: (splits || []).map((split: { userId: string; amount: number }) => ({
               userId: split.userId,
               amount: Number(split.amount),
-              isSettled: split.userId === paidById,
-              settledAt: split.userId === paidById ? new Date() : null,
+              isSettled: split.userId === effectivePaidById,
+              settledAt: split.userId === effectivePaidById ? new Date() : null,
             })),
           },
         },
@@ -134,11 +134,11 @@ export async function POST(req: Request) {
         amount: cleanAmount,
         category: category || 'GROCERY',
         date: new Date(),
-        paidBy: { id: paidById, name: user?.name || 'Harman', email: user?.email || 'harman@lifecart.com' },
+        paidBy: { id: effectivePaidById, name: 'Harman', email: 'harman@lifecart.com' },
         splits: (splits || []).map((s: any) => ({
           userId: s.userId,
           amount: Number(s.amount),
-          isSettled: s.userId === paidById,
+          isSettled: s.userId === effectivePaidById,
         })),
       };
       return NextResponse.json({ success: true, expense: newExpense });
@@ -146,5 +146,34 @@ export async function POST(req: Request) {
   } catch (error: any) {
     console.error('Create expense error:', error);
     return NextResponse.json({ error: error?.message || 'Failed to create expense' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const idParam = searchParams.get('id');
+
+    let expenseId = idParam;
+    if (!expenseId) {
+      const body = await req.json().catch(() => ({}));
+      expenseId = body?.id;
+    }
+
+    if (!expenseId) {
+      return NextResponse.json({ error: 'Expense ID is required' }, { status: 400 });
+    }
+
+    try {
+      await prisma.expenseSplit.deleteMany({ where: { expenseId } });
+      await prisma.expense.delete({ where: { id: expenseId } });
+    } catch (dbErr) {
+      console.warn('Database delete failed in DELETE /api/expenses:', dbErr);
+    }
+
+    return NextResponse.json({ success: true, message: 'Expense deleted successfully' });
+  } catch (error: any) {
+    console.error('Delete expense error:', error);
+    return NextResponse.json({ error: 'Failed to delete expense' }, { status: 500 });
   }
 }
