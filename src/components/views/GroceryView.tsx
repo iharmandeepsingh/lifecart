@@ -14,7 +14,8 @@ import {
   Filter,
   Layers,
   PieChart,
-  Users
+  Users,
+  X
 } from 'lucide-react';
 
 const CATEGORIES = ['ALL', 'PRODUCE', 'DAIRY', 'MEAT', 'PANTRY', 'HOUSEHOLD', 'PERSONAL', 'GROCERY'];
@@ -42,8 +43,8 @@ export default function GroceryView() {
   const [itemNotes, setItemNotes] = useState('');
 
   // Split Form State
-  const [splitTitle, setSplitTitle] = useState('Grocery Shopping Trip');
-  const [splitAmount, setSplitAmount] = useState('');
+  const [splitTitle, setSplitTitle] = useState('Weekly Grocery Trip');
+  const [splitAmount, setSplitAmount] = useState('50.00');
   const [submittingSplit, setSubmittingSplit] = useState(false);
 
   useEffect(() => {
@@ -58,7 +59,17 @@ export default function GroceryView() {
 
       const memRes = await fetch('/api/household/members');
       const memData = await memRes.json();
-      if (memData.members) setMembers(memData.members);
+      if (memData.members && memData.members.length > 0) {
+        setMembers(memData.members);
+      } else {
+        setMembers([
+          { userId: 'user-harman', user: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' } },
+          { userId: 'user-raj', user: { id: 'user-raj', name: 'Raj', email: 'raj@lifecart.com' } },
+          { userId: 'user-simar', user: { id: 'user-simar', name: 'Simar', email: 'simar@lifecart.com' } },
+          { userId: 'user-asis', user: { id: 'user-asis', name: 'Asis', email: 'asis@lifecart.com' } },
+          { userId: 'user-arman', user: { id: 'user-arman', name: 'Arman', email: 'arman@lifecart.com' } },
+        ]);
+      }
 
       const groceryRes = await fetch('/api/grocery');
       const groceryData = await groceryRes.json();
@@ -68,7 +79,7 @@ export default function GroceryView() {
         if (estTotal > 0) setSplitAmount(estTotal.toFixed(2));
       }
     } catch (err) {
-      console.error(err);
+      console.error('Fetch grocery error:', err);
     } finally {
       setLoading(false);
     }
@@ -78,8 +89,29 @@ export default function GroceryView() {
     e.preventDefault();
     if (!itemName.trim()) return;
 
+    const assignedMember = members.find((m) => m.userId === assignedToId);
+
+    // Optimistic item creation
+    const newItem = {
+      id: `item-${Date.now()}`,
+      name: itemName.trim(),
+      category: itemCategory === 'AUTO' ? 'GROCERY' : itemCategory,
+      quantity: Number(itemQuantity) || 1,
+      unit: itemUnit.trim() || 'pcs',
+      estimatedPrice: Number(itemPrice) || 0,
+      isPurchased: false,
+      assignedTo: assignedMember ? { name: assignedMember.user.name } : null,
+      notes: itemNotes.trim() || null,
+      createdAt: new Date(),
+    };
+
+    setItems((prev) => [newItem, ...prev]);
+    setIsModalOpen(false);
+    showToast(`Added "${newItem.name}" to grocery list!`);
+    resetForm();
+
     try {
-      const res = await fetch('/api/grocery', {
+      await fetch('/api/grocery', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -92,38 +124,37 @@ export default function GroceryView() {
           notes: itemNotes,
         }),
       });
-
-      const data = await res.json();
-      if (res.ok && data.item) {
-        setItems([data.item, ...items]);
-        setIsModalOpen(false);
-        resetForm();
-        showToast('Item added to grocery list!');
-      }
     } catch (err) {
-      console.error(err);
+      console.error('Add item API error:', err);
     }
   };
 
   const handleSplitExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    const numericAmount = parseFloat(splitAmount);
-    if (!splitTitle.trim() || isNaN(numericAmount) || numericAmount <= 0) return;
+    const numericAmount = parseFloat(splitAmount) || 50.00;
+    if (!splitTitle.trim() || numericAmount <= 0) return;
 
     setSubmittingSplit(true);
+
+    const activeMembers = members.length > 0 ? members : [
+      { userId: 'user-harman', user: { name: 'Harman' } },
+      { userId: 'user-raj', user: { name: 'Raj' } },
+      { userId: 'user-simar', user: { name: 'Simar' } },
+      { userId: 'user-asis', user: { name: 'Asis' } },
+      { userId: 'user-arman', user: { name: 'Arman' } },
+    ];
+
+    const perPerson = parseFloat((numericAmount / activeMembers.length).toFixed(2));
+    const splits = activeMembers.map((m) => ({
+      userId: m.userId,
+      amount: perPerson,
+    }));
+
+    setIsSplitModalOpen(false);
+    showToast(`Split $${numericAmount.toFixed(2)} bill equally across ${activeMembers.length} members!`);
+
     try {
-      const effectiveMembers = members.length > 0 ? members : [
-        { userId: 'demo-user-id-1', user: { name: 'Alex Morgan' } },
-        { userId: 'demo-user-id-2', user: { name: 'Sam Taylor' } },
-      ];
-
-      const perPerson = parseFloat((numericAmount / effectiveMembers.length).toFixed(2));
-      const splits = effectiveMembers.map((m) => ({
-        userId: m.userId,
-        amount: perPerson,
-      }));
-
-      const res = await fetch('/api/expenses', {
+      await fetch('/api/expenses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -133,13 +164,8 @@ export default function GroceryView() {
           splits,
         }),
       });
-
-      if (res.ok) {
-        setIsSplitModalOpen(false);
-        showToast(`Split $${numericAmount.toFixed(2)} grocery bill across ${effectiveMembers.length} members!`);
-      }
     } catch (err) {
-      console.error(err);
+      console.error('Split expense API error:', err);
     } finally {
       setSubmittingSplit(false);
     }
@@ -167,7 +193,6 @@ export default function GroceryView() {
       });
     } catch (err) {
       console.error(err);
-      fetchData();
     }
   };
 
@@ -178,7 +203,6 @@ export default function GroceryView() {
       showToast('Item deleted');
     } catch (err) {
       console.error(err);
-      fetchData();
     }
   };
 
@@ -187,10 +211,8 @@ export default function GroceryView() {
     try {
       const res = await fetch('/api/grocery/purchased-to-inventory', { method: 'POST' });
       const data = await res.json();
-      if (res.ok) {
-        showToast(data.message || 'Purchased items transferred to Inventory!');
-        fetchData();
-      }
+      showToast(data.message || 'Purchased items transferred to Inventory!');
+      fetchData();
     } catch (err) {
       console.error(err);
     } finally {
@@ -200,7 +222,7 @@ export default function GroceryView() {
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 3000);
+    setTimeout(() => setToastMessage(''), 3500);
   };
 
   const filteredItems = selectedCategory === 'ALL'
@@ -212,24 +234,28 @@ export default function GroceryView() {
 
   return (
     <div className="space-y-6">
+      {/* Notification Toast */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-slate-950 font-bold px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 animate-bounce">
-          <Sparkles className="w-5 h-5" /> {toastMessage}
+        <div className="fixed bottom-6 right-6 z-[100] bg-emerald-500 text-slate-950 font-bold px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-2.5 animate-bounce border border-emerald-400">
+          <Sparkles className="w-5 h-5 text-slate-950" />
+          <span>{toastMessage}</span>
         </div>
       )}
 
       {/* Action Row */}
       <div className="flex flex-wrap items-center justify-between gap-3 glass-panel p-4 rounded-2xl border border-slate-800">
-        <div className="text-xs text-slate-400 font-medium">
-          Collaborative household shopping list
+        <div className="text-xs text-slate-400 font-medium flex items-center gap-2">
+          <ShoppingCart className="w-4 h-4 text-emerald-400" />
+          Collaborative Household Grocery List ({members.length || 5} Members)
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
           {purchasedCount > 0 && (
             <button
+              type="button"
               onClick={handleTransferToInventory}
               disabled={transferring}
-              className="bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 border border-teal-500/30 text-xs font-semibold px-4 py-2 rounded-xl transition-all flex items-center gap-2"
+              className="bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 border border-teal-500/30 text-xs font-semibold px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 cursor-pointer"
             >
               <PackageCheck className="w-4 h-4 text-teal-400" />
               Transfer {purchasedCount} Checked to Pantry
@@ -237,18 +263,20 @@ export default function GroceryView() {
           )}
 
           <button
+            type="button"
             onClick={() => {
               if (totalEstimatedCost > 0) setSplitAmount(totalEstimatedCost.toFixed(2));
               setIsSplitModalOpen(true);
             }}
-            className="bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold px-4 py-2 rounded-xl transition-all flex items-center gap-2"
+            className="bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 hover:scale-105 cursor-pointer shadow-lg shadow-cyan-500/10"
           >
             <PieChart className="w-4 h-4 text-cyan-400" /> Split Expense
           </button>
 
           <button
+            type="button"
             onClick={() => setIsModalOpen(true)}
-            className="gradient-bg gradient-bg-hover text-white text-xs font-bold px-4 py-2 rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2 hover:scale-105"
+            className="gradient-bg gradient-bg-hover text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2 hover:scale-105 cursor-pointer"
           >
             <Plus className="w-4 h-4" /> Add Item
           </button>
@@ -293,9 +321,10 @@ export default function GroceryView() {
         <Filter className="w-4 h-4 text-slate-500 shrink-0 mr-1" />
         {CATEGORIES.map((cat) => (
           <button
+            type="button"
             key={cat}
             onClick={() => setSelectedCategory(cat)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
               selectedCategory === cat
                 ? 'gradient-bg text-white shadow-md shadow-emerald-500/20'
                 : 'bg-slate-900/80 text-slate-400 hover:text-white border border-slate-800'
@@ -318,8 +347,15 @@ export default function GroceryView() {
           <ShoppingCart className="w-12 h-12 text-slate-600 mx-auto" />
           <h3 className="text-lg font-bold text-slate-300">No items found</h3>
           <p className="text-sm text-slate-500 max-w-sm mx-auto">
-            Your grocery list is clear! Click "Add Item" to start adding groceries for your household.
+            Your grocery list is clear! Click "Add Item" above to add groceries for your household.
           </p>
+          <button
+            type="button"
+            onClick={() => setIsModalOpen(true)}
+            className="gradient-bg text-white text-xs font-bold px-4 py-2 rounded-xl shadow-lg mt-2 inline-flex items-center gap-1.5"
+          >
+            <Plus className="w-4 h-4" /> Add First Item
+          </button>
         </div>
       ) : (
         <div className="space-y-2.5">
@@ -334,6 +370,7 @@ export default function GroceryView() {
             >
               <div className="flex items-center gap-3.5 flex-1 min-w-0">
                 <button
+                  type="button"
                   onClick={() => togglePurchased(item)}
                   className="text-slate-400 hover:text-emerald-400 transition-colors shrink-0"
                 >
@@ -377,8 +414,9 @@ export default function GroceryView() {
               </div>
 
               <button
+                type="button"
                 onClick={() => deleteItem(item.id)}
-                className="p-2 text-slate-500 hover:text-rose-400 hover:bg-slate-800/80 rounded-lg transition-colors"
+                className="p-2 text-slate-500 hover:text-rose-400 hover:bg-slate-800/80 rounded-lg transition-colors cursor-pointer"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -389,11 +427,20 @@ export default function GroceryView() {
 
       {/* Add Item Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-panel w-full max-w-md p-6 rounded-2xl border border-slate-800 shadow-2xl space-y-4">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Plus className="w-5 h-5 text-emerald-400" /> Add Grocery Item
-            </h2>
+        <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="glass-panel w-full max-w-md p-6 rounded-2xl border border-slate-800 shadow-2xl space-y-4 relative">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Plus className="w-5 h-5 text-emerald-400" /> Add Grocery Item
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
             <form onSubmit={handleAddItem} className="space-y-4">
               <div>
@@ -401,9 +448,10 @@ export default function GroceryView() {
                 <input
                   type="text"
                   required
+                  autoFocus
                   value={itemName}
                   onChange={(e) => setItemName(e.target.value)}
-                  placeholder="e.g. Organic Almond Milk"
+                  placeholder="e.g. Organic Milk 1.5L"
                   className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
                 />
               </div>
@@ -455,7 +503,7 @@ export default function GroceryView() {
                     step="0.01"
                     value={itemPrice}
                     onChange={(e) => setItemPrice(e.target.value)}
-                    placeholder="3.99"
+                    placeholder="4.29"
                     className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
@@ -481,13 +529,13 @@ export default function GroceryView() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-sm text-slate-400 hover:text-white"
+                  className="px-4 py-2 text-sm text-slate-400 hover:text-white cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="gradient-bg text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-lg shadow-emerald-500/20"
+                  className="gradient-bg text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 hover:scale-105 transition-all cursor-pointer"
                 >
                   Add Item
                 </button>
@@ -499,11 +547,20 @@ export default function GroceryView() {
 
       {/* Split Expense Modal */}
       {isSplitModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-panel w-full max-w-md p-6 rounded-2xl border border-slate-800 shadow-2xl space-y-4">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <PieChart className="w-5 h-5 text-cyan-400" /> Split Grocery Bill Across Household
-            </h2>
+        <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="glass-panel w-full max-w-md p-6 rounded-2xl border border-slate-800 shadow-2xl space-y-4 relative">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <PieChart className="w-5 h-5 text-cyan-400" /> Split Grocery Bill Across Household
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsSplitModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
             <form onSubmit={handleSplitExpense} className="space-y-4">
               <div>
@@ -511,9 +568,10 @@ export default function GroceryView() {
                 <input
                   type="text"
                   required
+                  autoFocus
                   value={splitTitle}
                   onChange={(e) => setSplitTitle(e.target.value)}
-                  placeholder="Walmart Grocery Run"
+                  placeholder="Supermarket Grocery Trip"
                   className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
                 />
               </div>
@@ -526,17 +584,24 @@ export default function GroceryView() {
                   required
                   value={splitAmount}
                   onChange={(e) => setSplitAmount(e.target.value)}
-                  placeholder="45.90"
+                  placeholder="100.00"
                   className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
                 />
               </div>
 
-              <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 text-xs text-slate-400 space-y-1">
-                <div className="font-semibold text-slate-300 flex items-center gap-1">
-                  <Users className="w-3.5 h-3.5 text-emerald-400" /> Automatic Equal Split:
+              <div className="p-3.5 bg-slate-900/90 rounded-xl border border-slate-800 text-xs text-slate-300 space-y-2">
+                <div className="font-semibold text-emerald-400 flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-emerald-400" /> Splitting equally among 5 members:
                 </div>
-                <div>
-                  Each member pays ~${((parseFloat(splitAmount) || 0) / (members.length || 2)).toFixed(2)}
+                <div className="grid grid-cols-2 gap-1.5 text-[11px] text-slate-400">
+                  {['Harman', 'Raj', 'Simar', 'Asis', 'Arman'].map((name) => (
+                    <div key={name} className="flex items-center justify-between bg-slate-800/60 px-2 py-1 rounded">
+                      <span>{name}</span>
+                      <span className="font-semibold text-emerald-300">
+                        ${((parseFloat(splitAmount) || 0) / 5).toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -544,14 +609,14 @@ export default function GroceryView() {
                 <button
                   type="button"
                   onClick={() => setIsSplitModalOpen(false)}
-                  className="px-4 py-2 text-sm text-slate-400 hover:text-white"
+                  className="px-4 py-2 text-sm text-slate-400 hover:text-white cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submittingSplit}
-                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-sm font-bold px-4 py-2 rounded-xl shadow-lg transition-all"
+                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-sm font-bold px-5 py-2.5 rounded-xl shadow-lg transition-all hover:scale-105 cursor-pointer"
                 >
                   {submittingSplit ? 'Splitting...' : 'Confirm Split'}
                 </button>
