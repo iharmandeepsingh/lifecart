@@ -74,7 +74,6 @@ export default function ExpensesView() {
     return new Set();
   });
 
-  // If localStorage has expenses, set loading to false immediately (0ms delay)
   const [loading, setLoading] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const storedExp = localStorage.getItem(LOCAL_STORAGE_EXPENSES_KEY);
@@ -121,7 +120,8 @@ export default function ExpensesView() {
       const expRes = await fetch('/api/expenses');
       const expData = await expRes.json();
 
-      if (expData.expenses && typeof window !== 'undefined' && !localStorage.getItem(LOCAL_STORAGE_EXPENSES_KEY)) {
+      if (expData.expenses) {
+        // ALWAYS update expenses with fresh server API response for multi-device sync
         persistExpenses(expData.expenses);
       }
       if (expData.members && expData.members.length > 0) {
@@ -205,6 +205,7 @@ export default function ExpensesView() {
           splits: activeMembers.map((m) => ({ userId: m.userId, amount: perMemberAmount })),
         }),
       });
+      fetchData();
     } catch (err) {
       console.error('API create expense error:', err);
     }
@@ -217,6 +218,7 @@ export default function ExpensesView() {
 
     try {
       await fetch(`/api/expenses?id=${expenseId}`, { method: 'DELETE' });
+      fetchData();
     } catch (err) {
       console.error('API delete expense error:', err);
     }
@@ -236,6 +238,7 @@ export default function ExpensesView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetUserId }),
       });
+      fetchData();
     } catch (err) {
       console.error(err);
     } finally {

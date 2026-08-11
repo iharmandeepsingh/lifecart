@@ -39,7 +39,6 @@ export default function GroceryView() {
     return [];
   });
 
-  // If local storage has items, set loading to false immediately (0ms delay)
   const [loading, setLoading] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -104,9 +103,8 @@ export default function GroceryView() {
       const groceryRes = await fetch('/api/grocery');
       const groceryData = await groceryRes.json();
       if (groceryData.list?.items) {
-        if (typeof window !== 'undefined' && !localStorage.getItem(LOCAL_STORAGE_KEY)) {
-          persistItems(groceryData.list.items);
-        }
+        // ALWAYS update items with fresh server API response for multi-device sync
+        persistItems(groceryData.list.items);
         const estTotal = groceryData.list.items.reduce((sum: number, i: any) => sum + (i.estimatedPrice || 0) * (i.quantity || 1), 0);
         if (estTotal > 0) setSplitAmount(estTotal.toFixed(2));
       }
@@ -157,6 +155,7 @@ export default function GroceryView() {
           notes: itemNotes,
         }),
       });
+      fetchData();
     } catch (err) {
       console.error('Add item API error:', err);
     }
@@ -225,6 +224,7 @@ export default function GroceryView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isPurchased: nextPurchasedState }),
       });
+      fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -237,6 +237,7 @@ export default function GroceryView() {
 
     try {
       await fetch(`/api/grocery/item/${id}`, { method: 'DELETE' });
+      fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -248,9 +249,7 @@ export default function GroceryView() {
       const res = await fetch('/api/grocery/purchased-to-inventory', { method: 'POST' });
       const data = await res.json();
       showToast(data.message || 'Purchased items transferred to Inventory!');
-      
-      const unpurchasedOnly = items.filter((i) => !i.isPurchased);
-      persistItems(unpurchasedOnly);
+      fetchData();
     } catch (err) {
       console.error(err);
     } finally {
