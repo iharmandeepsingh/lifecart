@@ -4,14 +4,21 @@ import { verifyPassword, signToken, TOKEN_COOKIE_NAME } from '@/lib/auth';
 
 export async function POST(req: Request) {
   try {
-    const { email, password } = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
+    }
+
+    const { email, password } = body;
 
     if (!email || !password) {
       return NextResponse.json({ error: 'Email and password are required.' }, { status: 400 });
     }
 
+    const cleanEmail = String(email).toLowerCase().trim();
+
     const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase().trim() },
+      where: { email: cleanEmail },
     });
 
     if (!user) {
@@ -44,8 +51,10 @@ export async function POST(req: Request) {
     });
 
     return response;
-  } catch (error) {
-    console.error('Login error:', error);
-    return NextResponse.json({ error: 'Internal server error during login.' }, { status: 500 });
+  } catch (error: any) {
+    console.error('Login Error Details:', error?.stack || error);
+    return NextResponse.json({ 
+      error: error?.message || 'Database connection error. Please ensure DATABASE_URL is set in Netlify Environment Variables.' 
+    }, { status: 500 });
   }
 }
