@@ -10,6 +10,24 @@ const FALLBACK_5_MEMBERS = [
   { userId: 'user-arman', user: { id: 'user-arman', name: 'Arman', email: 'arman@lifecart.com' } },
 ];
 
+let inMemoryExpenses: any[] = [
+  {
+    id: 'exp-1',
+    title: 'Weekly Supermarket Grocery Run',
+    amount: 100.00,
+    category: 'GROCERY',
+    date: new Date().toISOString(),
+    paidBy: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' },
+    splits: [
+      { userId: 'user-harman', amount: 20.00, isSettled: true, user: { id: 'user-harman', name: 'Harman' } },
+      { userId: 'user-raj', amount: 20.00, isSettled: false, user: { id: 'user-raj', name: 'Raj' } },
+      { userId: 'user-simar', amount: 20.00, isSettled: false, user: { id: 'user-simar', name: 'Simar' } },
+      { userId: 'user-asis', amount: 20.00, isSettled: false, user: { id: 'user-asis', name: 'Asis' } },
+      { userId: 'user-arman', amount: 20.00, isSettled: false, user: { id: 'user-arman', name: 'Arman' } },
+    ],
+  },
+];
+
 export async function GET() {
   const user = await getCurrentUser();
   const householdId = user?.householdId || 'demo-household-id-1';
@@ -50,32 +68,24 @@ export async function GET() {
 
     return NextResponse.json({ expenses, balances, members: activeMembers });
   } catch (err) {
-    console.warn('Database query failed in GET /api/expenses, using 5 member fallback:', err);
+    console.warn('Database query failed in GET /api/expenses, returning inMemoryExpenses:', err);
+
+    const balances: Record<string, number> = {};
+    FALLBACK_5_MEMBERS.forEach((m) => (balances[m.userId] = 0));
+
+    inMemoryExpenses.forEach((expense) => {
+      const payerId = expense.paidBy?.id || 'user-harman';
+      (expense.splits || []).forEach((split: any) => {
+        if (!split.isSettled && split.userId !== payerId) {
+          balances[split.userId] = (balances[split.userId] || 0) - split.amount;
+          balances[payerId] = (balances[payerId] || 0) + split.amount;
+        }
+      });
+    });
+
     return NextResponse.json({
-      expenses: [
-        {
-          id: 'exp-1',
-          title: 'Weekly Supermarket Grocery Run',
-          amount: 100.00,
-          category: 'GROCERY',
-          date: new Date(),
-          paidBy: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' },
-          splits: [
-            { userId: 'user-harman', amount: 20.00, isSettled: true, user: { id: 'user-harman', name: 'Harman' } },
-            { userId: 'user-raj', amount: 20.00, isSettled: false, user: { id: 'user-raj', name: 'Raj' } },
-            { userId: 'user-simar', amount: 20.00, isSettled: false, user: { id: 'user-simar', name: 'Simar' } },
-            { userId: 'user-asis', amount: 20.00, isSettled: false, user: { id: 'user-asis', name: 'Asis' } },
-            { userId: 'user-arman', amount: 20.00, isSettled: false, user: { id: 'user-arman', name: 'Arman' } },
-          ],
-        },
-      ],
-      balances: {
-        'user-harman': 80.00,
-        'user-raj': -20.00,
-        'user-simar': -20.00,
-        'user-asis': -20.00,
-        'user-arman': -20.00,
-      },
+      expenses: inMemoryExpenses,
+      balances,
       members: FALLBACK_5_MEMBERS,
     });
   }
@@ -96,6 +106,25 @@ export async function POST(req: Request) {
     const cleanTitle = String(title).trim();
     const cleanAmount = Number(amount) || 0;
     const effectivePaidById = paidById || user?.id || 'user-harman';
+
+    const payerMember = FALLBACK_5_MEMBERS.find((m) => m.userId === effectivePaidById) || FALLBACK_5_MEMBERS[0];
+
+    const newExpenseObj = {
+      id: `exp-${Date.now()}`,
+      title: cleanTitle,
+      amount: cleanAmount,
+      category: category || 'GROCERY',
+      date: date ? new Date(date).toISOString() : new Date().toISOString(),
+      paidBy: { id: effectivePaidById, name: payerMember.user.name, email: payerMember.user.email },
+      splits: (splits || []).map((s: any) => ({
+        userId: s.userId,
+        amount: Number(s.amount),
+        isSettled: s.userId === effectivePaidById,
+      })),
+    };
+
+    // Add to inMemoryExpenses list
+    inMemoryExpenses.unshift(newExpenseObj);
 
     try {
       const expense = await prisma.expense.create({
@@ -128,20 +157,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, expense });
     } catch (dbErr) {
       console.warn('Database write failed in POST /api/expenses, using fallback store:', dbErr);
-      const newExpense = {
-        id: `expense-${Date.now()}`,
-        title: cleanTitle,
-        amount: cleanAmount,
-        category: category || 'GROCERY',
-        date: new Date(),
-        paidBy: { id: effectivePaidById, name: 'Harman', email: 'harman@lifecart.com' },
-        splits: (splits || []).map((s: any) => ({
-          userId: s.userId,
-          amount: Number(s.amount),
-          isSettled: s.userId === effectivePaidById,
-        })),
-      };
-      return NextResponse.json({ success: true, expense: newExpense });
+      return NextResponse.json({ success: true, expense: newExpenseObj });
     }
   } catch (error: any) {
     console.error('Create expense error:', error);
@@ -163,6 +179,9 @@ export async function DELETE(req: Request) {
     if (!expenseId) {
       return NextResponse.json({ error: 'Expense ID is required' }, { status: 400 });
     }
+
+    // Remove from inMemoryExpenses list permanently
+    inMemoryExpenses = inMemoryExpenses.filter((e) => e.id !== expenseId);
 
     try {
       await prisma.expenseSplit.deleteMany({ where: { expenseId } });
