@@ -40,6 +40,9 @@ const INITIAL_EXPENSES = [
   },
 ];
 
+const LOCAL_STORAGE_EXPENSES_KEY = 'lifecart_expenses_v2';
+const LOCAL_STORAGE_SETTLED_KEY = 'lifecart_settled_users_v2';
+
 export default function ExpensesView() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [members, setMembers] = useState<any[]>(DEFAULT_5_MEMBERS);
@@ -58,8 +61,49 @@ export default function ExpensesView() {
   const [paidById, setPaidById] = useState('user-harman');
 
   useEffect(() => {
+    // Load persistent expenses & settled users from localStorage
+    if (typeof window !== 'undefined') {
+      const storedExp = localStorage.getItem(LOCAL_STORAGE_EXPENSES_KEY);
+      if (storedExp) {
+        try {
+          const parsed = JSON.parse(storedExp);
+          if (Array.isArray(parsed)) {
+            setExpenses(parsed);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      const storedSet = localStorage.getItem(LOCAL_STORAGE_SETTLED_KEY);
+      if (storedSet) {
+        try {
+          const parsed = JSON.parse(storedSet);
+          if (Array.isArray(parsed)) {
+            setSettledUserIds(new Set(parsed));
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }
+
     fetchData();
   }, []);
+
+  const persistExpenses = (newExpenses: any[]) => {
+    setExpenses(newExpenses);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(LOCAL_STORAGE_EXPENSES_KEY, JSON.stringify(newExpenses));
+    }
+  };
+
+  const persistSettledUsers = (newSet: Set<string>) => {
+    setSettledUserIds(newSet);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(LOCAL_STORAGE_SETTLED_KEY, JSON.stringify(Array.from(newSet)));
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -69,8 +113,9 @@ export default function ExpensesView() {
 
       const expRes = await fetch('/api/expenses');
       const expData = await expRes.json();
-      if (expData.expenses && expData.expenses.length > 0) {
-        setExpenses(expData.expenses);
+
+      if (expData.expenses && typeof window !== 'undefined' && !localStorage.getItem(LOCAL_STORAGE_EXPENSES_KEY)) {
+        persistExpenses(expData.expenses);
       }
       if (expData.members && expData.members.length > 0) {
         setMembers(expData.members);
@@ -130,7 +175,9 @@ export default function ExpensesView() {
       })),
     };
 
-    setExpenses((prev) => [newExpense, ...prev]);
+    const updated = [newExpense, ...expenses];
+    persistExpenses(updated);
+
     setIsModalOpen(false);
     showToast(`Added "$${numAmount.toFixed(2)}" expense paid by ${selectedPayer.user?.name || 'Harman'}!`);
 
@@ -157,7 +204,8 @@ export default function ExpensesView() {
   };
 
   const handleDeleteExpense = async (expenseId: string) => {
-    setExpenses((prev) => prev.filter((e) => e.id !== expenseId));
+    const updated = expenses.filter((e) => e.id !== expenseId);
+    persistExpenses(updated);
     showToast('Expense removed cleanly!');
 
     try {
@@ -169,7 +217,10 @@ export default function ExpensesView() {
 
   const handleSettleUp = async (targetUserId: string, targetName: string) => {
     setSettlingUserId(targetUserId);
-    setSettledUserIds((prev) => new Set(prev).add(targetUserId));
+    const updatedSet = new Set(settledUserIds);
+    updatedSet.add(targetUserId);
+    persistSettledUsers(updatedSet);
+
     showToast(`Settled up all balances with ${targetName}!`);
 
     try {

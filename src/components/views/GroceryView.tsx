@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 
 const CATEGORIES = ['ALL', 'PRODUCE', 'DAIRY', 'MEAT', 'PANTRY', 'HOUSEHOLD', 'PERSONAL', 'GROCERY'];
+const LOCAL_STORAGE_KEY = 'lifecart_grocery_items_v2';
 
 export default function GroceryView() {
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -48,8 +49,29 @@ export default function GroceryView() {
   const [submittingSplit, setSubmittingSplit] = useState(false);
 
   useEffect(() => {
+    // Load local storage first for 100% refresh persistence
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setItems(parsed);
+          }
+        } catch (e) {
+          console.error('Error loading stored grocery items:', e);
+        }
+      }
+    }
     fetchData();
   }, []);
+
+  const persistItems = (newItems: any[]) => {
+    setItems(newItems);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newItems));
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -74,7 +96,10 @@ export default function GroceryView() {
       const groceryRes = await fetch('/api/grocery');
       const groceryData = await groceryRes.json();
       if (groceryData.list?.items) {
-        setItems(groceryData.list.items);
+        // Only set if no local storage items exist
+        if (typeof window !== 'undefined' && !localStorage.getItem(LOCAL_STORAGE_KEY)) {
+          persistItems(groceryData.list.items);
+        }
         const estTotal = groceryData.list.items.reduce((sum: number, i: any) => sum + (i.estimatedPrice || 0) * (i.quantity || 1), 0);
         if (estTotal > 0) setSplitAmount(estTotal.toFixed(2));
       }
@@ -91,7 +116,6 @@ export default function GroceryView() {
 
     const assignedMember = members.find((m) => m.userId === assignedToId);
 
-    // Optimistic item creation
     const newItem = {
       id: `item-${Date.now()}`,
       name: itemName.trim(),
@@ -105,7 +129,9 @@ export default function GroceryView() {
       createdAt: new Date(),
     };
 
-    setItems((prev) => [newItem, ...prev]);
+    const updated = [newItem, ...items];
+    persistItems(updated);
+
     setIsModalOpen(false);
     showToast(`Added "${newItem.name}" to grocery list!`);
     resetForm();
@@ -183,7 +209,8 @@ export default function GroceryView() {
 
   const togglePurchased = async (item: any) => {
     const nextPurchasedState = !item.isPurchased;
-    setItems(items.map((i) => (i.id === item.id ? { ...i, isPurchased: nextPurchasedState } : i)));
+    const updated = items.map((i) => (i.id === item.id ? { ...i, isPurchased: nextPurchasedState } : i));
+    persistItems(updated);
 
     try {
       await fetch(`/api/grocery/item/${item.id}`, {
@@ -197,10 +224,12 @@ export default function GroceryView() {
   };
 
   const deleteItem = async (id: string) => {
-    setItems(items.filter((i) => i.id !== id));
+    const updated = items.filter((i) => i.id !== id);
+    persistItems(updated);
+    showToast('Item deleted');
+
     try {
       await fetch(`/api/grocery/item/${id}`, { method: 'DELETE' });
-      showToast('Item deleted');
     } catch (err) {
       console.error(err);
     }
@@ -212,7 +241,9 @@ export default function GroceryView() {
       const res = await fetch('/api/grocery/purchased-to-inventory', { method: 'POST' });
       const data = await res.json();
       showToast(data.message || 'Purchased items transferred to Inventory!');
-      fetchData();
+      
+      const unpurchasedOnly = items.filter((i) => !i.isPurchased);
+      persistItems(unpurchasedOnly);
     } catch (err) {
       console.error(err);
     } finally {
