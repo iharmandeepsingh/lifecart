@@ -2,7 +2,13 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 
-const memoryExpensesStore: any[] = [];
+const FALLBACK_5_MEMBERS = [
+  { userId: 'user-harman', user: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' } },
+  { userId: 'user-raj', user: { id: 'user-raj', name: 'Raj', email: 'raj@lifecart.com' } },
+  { userId: 'user-simar', user: { id: 'user-simar', name: 'Simar', email: 'simar@lifecart.com' } },
+  { userId: 'user-asis', user: { id: 'user-asis', name: 'Asis', email: 'asis@lifecart.com' } },
+  { userId: 'user-arman', user: { id: 'user-arman', name: 'Arman', email: 'arman@lifecart.com' } },
+];
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -27,8 +33,9 @@ export async function GET() {
       include: { user: { select: { id: true, name: true, email: true } } },
     });
 
+    const activeMembers = members.length > 0 ? members : FALLBACK_5_MEMBERS;
     const balances: Record<string, number> = {};
-    members.forEach((m) => {
+    activeMembers.forEach((m) => {
       balances[m.userId] = 0;
     });
 
@@ -41,16 +48,35 @@ export async function GET() {
       });
     });
 
-    return NextResponse.json({ expenses, balances, members });
+    return NextResponse.json({ expenses, balances, members: activeMembers });
   } catch (err) {
-    console.warn('Database query failed in GET /api/expenses, using fallback data:', err);
+    console.warn('Database query failed in GET /api/expenses, using 5 member fallback:', err);
     return NextResponse.json({
-      expenses: memoryExpensesStore,
-      balances: { 'demo-user-id-1': 15.00, 'demo-user-id-2': -15.00 },
-      members: [
-        { userId: 'demo-user-id-1', user: { id: 'demo-user-id-1', name: 'Alex Morgan', email: 'alex@lifecart.com' } },
-        { userId: 'demo-user-id-2', user: { id: 'demo-user-id-2', name: 'Sam Taylor', email: 'sam@lifecart.com' } },
+      expenses: [
+        {
+          id: 'exp-1',
+          title: 'Weekly Supermarket Grocery Run',
+          amount: 100.00,
+          category: 'GROCERY',
+          date: new Date(),
+          paidBy: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' },
+          splits: [
+            { userId: 'user-harman', amount: 20.00, isSettled: true, user: { id: 'user-harman', name: 'Harman' } },
+            { userId: 'user-raj', amount: 20.00, isSettled: false, user: { id: 'user-raj', name: 'Raj' } },
+            { userId: 'user-simar', amount: 20.00, isSettled: false, user: { id: 'user-simar', name: 'Simar' } },
+            { userId: 'user-asis', amount: 20.00, isSettled: false, user: { id: 'user-asis', name: 'Asis' } },
+            { userId: 'user-arman', amount: 20.00, isSettled: false, user: { id: 'user-arman', name: 'Arman' } },
+          ],
+        },
       ],
+      balances: {
+        'user-harman': 80.00, // Harman paid $100, receives $80 from 4 members
+        'user-raj': -20.00,
+        'user-simar': -20.00,
+        'user-asis': -20.00,
+        'user-arman': -20.00,
+      },
+      members: FALLBACK_5_MEMBERS,
     });
   }
 }
@@ -59,7 +85,7 @@ export async function POST(req: Request) {
   try {
     const user = await getCurrentUser();
     const householdId = user?.householdId || 'demo-household-id-1';
-    const paidById = user?.id || 'demo-user-id-1';
+    const paidById = user?.id || 'user-harman';
 
     const body = await req.json().catch(() => ({}));
     const { title, amount, category, date, splits } = body;
@@ -108,14 +134,13 @@ export async function POST(req: Request) {
         amount: cleanAmount,
         category: category || 'GROCERY',
         date: new Date(),
-        paidBy: { id: paidById, name: user?.name || 'Alex Morgan', email: user?.email || 'alex@lifecart.com' },
+        paidBy: { id: paidById, name: user?.name || 'Harman', email: user?.email || 'harman@lifecart.com' },
         splits: (splits || []).map((s: any) => ({
           userId: s.userId,
           amount: Number(s.amount),
           isSettled: s.userId === paidById,
         })),
       };
-      memoryExpensesStore.unshift(newExpense);
       return NextResponse.json({ success: true, expense: newExpense });
     }
   } catch (error: any) {
