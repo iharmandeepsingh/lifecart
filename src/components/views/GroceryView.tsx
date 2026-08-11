@@ -12,7 +12,9 @@ import {
   Sparkles, 
   DollarSign,
   Filter,
-  Layers
+  Layers,
+  PieChart,
+  Users
 } from 'lucide-react';
 
 const CATEGORIES = ['ALL', 'PRODUCE', 'DAIRY', 'MEAT', 'PANTRY', 'HOUSEHOLD', 'PERSONAL', 'GROCERY'];
@@ -23,11 +25,14 @@ export default function GroceryView() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState('ALL');
+  
+  // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
   const [transferring, setTransferring] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
-  // Form State
+  // Add Form State
   const [itemName, setItemName] = useState('');
   const [itemCategory, setItemCategory] = useState('AUTO');
   const [itemQuantity, setItemQuantity] = useState('1');
@@ -35,6 +40,11 @@ export default function GroceryView() {
   const [itemPrice, setItemPrice] = useState('');
   const [assignedToId, setAssignedToId] = useState('');
   const [itemNotes, setItemNotes] = useState('');
+
+  // Split Form State
+  const [splitTitle, setSplitTitle] = useState('Grocery Shopping Trip');
+  const [splitAmount, setSplitAmount] = useState('');
+  const [submittingSplit, setSubmittingSplit] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -52,7 +62,11 @@ export default function GroceryView() {
 
       const groceryRes = await fetch('/api/grocery');
       const groceryData = await groceryRes.json();
-      if (groceryData.list?.items) setItems(groceryData.list.items);
+      if (groceryData.list?.items) {
+        setItems(groceryData.list.items);
+        const estTotal = groceryData.list.items.reduce((sum: number, i: any) => sum + (i.estimatedPrice || 0) * (i.quantity || 1), 0);
+        if (estTotal > 0) setSplitAmount(estTotal.toFixed(2));
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -88,6 +102,46 @@ export default function GroceryView() {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleSplitExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const numericAmount = parseFloat(splitAmount);
+    if (!splitTitle.trim() || isNaN(numericAmount) || numericAmount <= 0) return;
+
+    setSubmittingSplit(true);
+    try {
+      const effectiveMembers = members.length > 0 ? members : [
+        { userId: 'demo-user-id-1', user: { name: 'Alex Morgan' } },
+        { userId: 'demo-user-id-2', user: { name: 'Sam Taylor' } },
+      ];
+
+      const perPerson = parseFloat((numericAmount / effectiveMembers.length).toFixed(2));
+      const splits = effectiveMembers.map((m) => ({
+        userId: m.userId,
+        amount: perPerson,
+      }));
+
+      const res = await fetch('/api/expenses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: splitTitle,
+          amount: numericAmount,
+          category: 'GROCERY',
+          splits,
+        }),
+      });
+
+      if (res.ok) {
+        setIsSplitModalOpen(false);
+        showToast(`Split $${numericAmount.toFixed(2)} grocery bill across ${effectiveMembers.length} members!`);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSubmittingSplit(false);
     }
   };
 
@@ -159,7 +213,7 @@ export default function GroceryView() {
   return (
     <div className="space-y-6">
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-slate-950 font-semibold px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 animate-bounce">
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-slate-950 font-bold px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 animate-bounce">
           <Sparkles className="w-5 h-5" /> {toastMessage}
         </div>
       )}
@@ -183,8 +237,18 @@ export default function GroceryView() {
           )}
 
           <button
+            onClick={() => {
+              if (totalEstimatedCost > 0) setSplitAmount(totalEstimatedCost.toFixed(2));
+              setIsSplitModalOpen(true);
+            }}
+            className="bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold px-4 py-2 rounded-xl transition-all flex items-center gap-2"
+          >
+            <PieChart className="w-4 h-4 text-cyan-400" /> Split Expense
+          </button>
+
+          <button
             onClick={() => setIsModalOpen(true)}
-            className="gradient-bg gradient-bg-hover text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2"
+            className="gradient-bg gradient-bg-hover text-white text-xs font-bold px-4 py-2 rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2 hover:scale-105"
           >
             <Plus className="w-4 h-4" /> Add Item
           </button>
@@ -426,6 +490,70 @@ export default function GroceryView() {
                   className="gradient-bg text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-lg shadow-emerald-500/20"
                 >
                   Add Item
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Split Expense Modal */}
+      {isSplitModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glass-panel w-full max-w-md p-6 rounded-2xl border border-slate-800 shadow-2xl space-y-4">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <PieChart className="w-5 h-5 text-cyan-400" /> Split Grocery Bill Across Household
+            </h2>
+
+            <form onSubmit={handleSplitExpense} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Trip / Expense Title</label>
+                <input
+                  type="text"
+                  required
+                  value={splitTitle}
+                  onChange={(e) => setSplitTitle(e.target.value)}
+                  placeholder="Walmart Grocery Run"
+                  className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Total Bill Amount ($)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={splitAmount}
+                  onChange={(e) => setSplitAmount(e.target.value)}
+                  placeholder="45.90"
+                  className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 text-xs text-slate-400 space-y-1">
+                <div className="font-semibold text-slate-300 flex items-center gap-1">
+                  <Users className="w-3.5 h-3.5 text-emerald-400" /> Automatic Equal Split:
+                </div>
+                <div>
+                  Each member pays ~${((parseFloat(splitAmount) || 0) / (members.length || 2)).toFixed(2)}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setIsSplitModalOpen(false)}
+                  className="px-4 py-2 text-sm text-slate-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingSplit}
+                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-sm font-bold px-4 py-2 rounded-xl shadow-lg transition-all"
+                >
+                  {submittingSplit ? 'Splitting...' : 'Confirm Split'}
                 </button>
               </div>
             </form>
