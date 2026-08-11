@@ -24,8 +24,30 @@ const LOCAL_STORAGE_KEY = 'lifecart_grocery_items_v2';
 export default function GroceryView() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
-  const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  // Synchronous instant hydration from localStorage
+  const [items, setItems] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        } catch (e) {}
+      }
+    }
+    return [];
+  });
+
+  // If local storage has items, set loading to false immediately (0ms delay)
+  const [loading, setLoading] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (stored) return false;
+    }
+    return true;
+  });
+
   const [selectedCategory, setSelectedCategory] = useState('ALL');
   
   // Modals
@@ -49,20 +71,6 @@ export default function GroceryView() {
   const [submittingSplit, setSubmittingSplit] = useState(false);
 
   useEffect(() => {
-    // Load local storage first for 100% refresh persistence
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setItems(parsed);
-          }
-        } catch (e) {
-          console.error('Error loading stored grocery items:', e);
-        }
-      }
-    }
     fetchData();
   }, []);
 
@@ -96,7 +104,6 @@ export default function GroceryView() {
       const groceryRes = await fetch('/api/grocery');
       const groceryData = await groceryRes.json();
       if (groceryData.list?.items) {
-        // Only set if no local storage items exist
         if (typeof window !== 'undefined' && !localStorage.getItem(LOCAL_STORAGE_KEY)) {
           persistItems(groceryData.list.items);
         }

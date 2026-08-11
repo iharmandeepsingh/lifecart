@@ -46,9 +46,43 @@ const LOCAL_STORAGE_SETTLED_KEY = 'lifecart_settled_users_v2';
 export default function ExpensesView() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [members, setMembers] = useState<any[]>(DEFAULT_5_MEMBERS);
-  const [expenses, setExpenses] = useState<any[]>(INITIAL_EXPENSES);
-  const [settledUserIds, setSettledUserIds] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
+
+  // Synchronous instant hydration from localStorage
+  const [expenses, setExpenses] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      const storedExp = localStorage.getItem(LOCAL_STORAGE_EXPENSES_KEY);
+      if (storedExp) {
+        try {
+          const parsed = JSON.parse(storedExp);
+          if (Array.isArray(parsed)) return parsed;
+        } catch (e) {}
+      }
+    }
+    return INITIAL_EXPENSES;
+  });
+
+  const [settledUserIds, setSettledUserIds] = useState<Set<string>>(() => {
+    if (typeof window !== 'undefined') {
+      const storedSet = localStorage.getItem(LOCAL_STORAGE_SETTLED_KEY);
+      if (storedSet) {
+        try {
+          const parsed = JSON.parse(storedSet);
+          if (Array.isArray(parsed)) return new Set(parsed);
+        } catch (e) {}
+      }
+    }
+    return new Set();
+  });
+
+  // If localStorage has expenses, set loading to false immediately (0ms delay)
+  const [loading, setLoading] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const storedExp = localStorage.getItem(LOCAL_STORAGE_EXPENSES_KEY);
+      if (storedExp) return false;
+    }
+    return true;
+  });
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [settlingUserId, setSettlingUserId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState('');
@@ -61,33 +95,6 @@ export default function ExpensesView() {
   const [paidById, setPaidById] = useState('user-harman');
 
   useEffect(() => {
-    // Load persistent expenses & settled users from localStorage
-    if (typeof window !== 'undefined') {
-      const storedExp = localStorage.getItem(LOCAL_STORAGE_EXPENSES_KEY);
-      if (storedExp) {
-        try {
-          const parsed = JSON.parse(storedExp);
-          if (Array.isArray(parsed)) {
-            setExpenses(parsed);
-          }
-        } catch (e) {
-          console.error(e);
-        }
-      }
-
-      const storedSet = localStorage.getItem(LOCAL_STORAGE_SETTLED_KEY);
-      if (storedSet) {
-        try {
-          const parsed = JSON.parse(storedSet);
-          if (Array.isArray(parsed)) {
-            setSettledUserIds(new Set(parsed));
-          }
-        } catch (e) {
-          console.error(e);
-        }
-      }
-    }
-
     fetchData();
   }, []);
 
