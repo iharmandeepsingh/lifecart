@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { useRouter, usePathname } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { 
   ShoppingBag, 
   Home, 
@@ -14,8 +14,6 @@ import {
   Menu, 
   X,
   Laptop,
-  LogOut,
-  ChevronRight,
   BrainCircuit,
   Database
 } from 'lucide-react';
@@ -33,18 +31,13 @@ interface NavbarProps {
 }
 
 export default function Navbar({ user }: NavbarProps) {
-  const router = useRouter();
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [loadingDemo, setLoadingDemo] = useState(false);
 
-  const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/auth/login');
-    router.refresh();
-  };
+  const displayUser = user || { name: 'Alex Morgan', email: 'alex@lifecart.com' };
 
   const handleLoadDemo = async () => {
     setLoadingDemo(true);
@@ -70,10 +63,6 @@ export default function Navbar({ user }: NavbarProps) {
     { href: '/mystuff', label: 'My Stuff', icon: Laptop },
   ];
 
-  if (pathname.startsWith('/auth') && pathname !== '/auth/login' && pathname !== '/auth/register') {
-    return null;
-  }
-
   return (
     <>
       <header className="sticky top-0 z-40 glass-panel border-b border-slate-800">
@@ -81,7 +70,7 @@ export default function Navbar({ user }: NavbarProps) {
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <div className="flex items-center gap-3">
-              <Link href={user ? '/dashboard' : '/'} className="flex items-center gap-2.5 group">
+              <Link href="/dashboard" className="flex items-center gap-2.5 group">
                 <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-transform">
                   <ShoppingBag className="w-5 h-5 text-white" />
                 </div>
@@ -98,115 +87,82 @@ export default function Navbar({ user }: NavbarProps) {
             </div>
 
             {/* 5 Core Navigation Sections */}
-            {user && (
-              <nav className="hidden md:flex items-center space-x-1">
-                {navLinks.map((link) => {
-                  const Icon = link.icon;
-                  const isActive = pathname === link.href || (link.href !== '/dashboard' && pathname.startsWith(link.href));
-                  return (
-                    <Link
-                      key={link.href}
-                      href={link.href}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold tracking-wide transition-all ${
-                        isActive
-                          ? 'gradient-bg text-white shadow-lg shadow-emerald-500/20'
-                          : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                      }`}
-                    >
-                      <Icon className="w-4 h-4" />
-                      {link.label}
-                    </Link>
-                  );
-                })}
-              </nav>
-            )}
+            <nav className="hidden md:flex items-center space-x-1">
+              {navLinks.map((link) => {
+                const Icon = link.icon;
+                const isActive = pathname === link.href || (link.href !== '/dashboard' && pathname.startsWith(link.href));
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold tracking-wide transition-all ${
+                      isActive
+                        ? 'gradient-bg text-white shadow-lg shadow-emerald-500/20'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {link.label}
+                  </Link>
+                );
+              })}
+            </nav>
 
             {/* Controls */}
             <div className="hidden md:flex items-center gap-2.5">
-              {user ? (
-                <div className="flex items-center gap-2.5">
-                  <button
-                    onClick={() => setAiModalOpen(true)}
-                    className="flex items-center gap-1.5 gradient-bg text-white text-xs font-bold px-3 py-1.5 rounded-xl shadow-md shadow-emerald-500/20 hover:scale-105 transition-transform"
-                  >
-                    <BrainCircuit className="w-4 h-4" /> AI Assistant
-                  </button>
+              <button
+                onClick={() => setAiModalOpen(true)}
+                className="flex items-center gap-1.5 gradient-bg text-white text-xs font-bold px-3 py-1.5 rounded-xl shadow-md shadow-emerald-500/20 hover:scale-105 transition-transform"
+              >
+                <BrainCircuit className="w-4 h-4" /> AI Assistant
+              </button>
 
-                  <button
-                    onClick={() => setSearchModalOpen(true)}
-                    className="flex items-center gap-2 bg-slate-900 border border-slate-800 hover:border-emerald-500/40 text-slate-400 text-xs px-3 py-1.5 rounded-lg transition-colors"
-                  >
-                    <Search className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Search...</span>
-                    <kbd className="bg-slate-800 text-[9px] font-mono px-1.5 py-0.5 rounded text-slate-400">⌘K</kbd>
-                  </button>
+              <button
+                onClick={() => setSearchModalOpen(true)}
+                className="flex items-center gap-2 bg-slate-900 border border-slate-800 hover:border-emerald-500/40 text-slate-400 text-xs px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <Search className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Search...</span>
+                <kbd className="bg-slate-800 text-[9px] font-mono px-1.5 py-0.5 rounded text-slate-400">⌘K</kbd>
+              </button>
 
-                  <button
-                    onClick={handleLoadDemo}
-                    disabled={loadingDemo}
-                    title="Load Demo Data"
-                    className="bg-slate-800/80 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1"
-                  >
-                    <Database className="w-3.5 h-3.5 text-emerald-400" /> Demo
-                  </button>
+              <button
+                onClick={handleLoadDemo}
+                disabled={loadingDemo}
+                title="Load Demo Data"
+                className="bg-slate-800/80 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+              >
+                <Database className="w-3.5 h-3.5 text-emerald-400" /> Demo
+              </button>
 
-                  <NotificationDropdown />
+              <NotificationDropdown />
 
-                  <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
-                    <div className="w-8 h-8 rounded-full gradient-bg flex items-center justify-center text-white text-xs font-bold shadow">
-                      {user.name.charAt(0).toUpperCase()}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={handleLogout}
-                    title="Log Out"
-                    className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800/60 rounded-lg transition-colors"
-                  >
-                    <LogOut className="w-4 h-4" />
-                  </button>
+              <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
+                <div className="w-8 h-8 rounded-full gradient-bg flex items-center justify-center text-white text-xs font-bold shadow" title={displayUser.email}>
+                  {displayUser.name.charAt(0).toUpperCase()}
                 </div>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <Link
-                    href="/auth/login"
-                    className="text-sm font-medium text-slate-300 hover:text-white px-4 py-2 transition-colors"
-                  >
-                    Sign In
-                  </Link>
-                  <Link
-                    href="/auth/register"
-                    className="gradient-bg gradient-bg-hover text-white text-sm font-medium px-4 py-2 rounded-lg shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-1.5"
-                  >
-                    Get Started Free <ChevronRight className="w-4 h-4" />
-                  </Link>
-                </div>
-              )}
+              </div>
             </div>
 
             {/* Mobile Button */}
             <div className="flex md:hidden items-center gap-2">
-              {user && (
-                <>
-                  <button onClick={() => setAiModalOpen(true)} className="p-2 text-emerald-400">
-                    <BrainCircuit className="w-5 h-5" />
-                  </button>
-                  <button onClick={() => setSearchModalOpen(true)} className="p-2 text-slate-300">
-                    <Search className="w-5 h-5 text-emerald-400" />
-                  </button>
-                  <NotificationDropdown />
-                  <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-2 text-slate-300">
-                    {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-                  </button>
-                </>
-              )}
+              <button onClick={() => setAiModalOpen(true)} className="p-2 text-emerald-400">
+                <BrainCircuit className="w-5 h-5" />
+              </button>
+              <button onClick={() => setSearchModalOpen(true)} className="p-2 text-slate-300">
+                <Search className="w-5 h-5 text-emerald-400" />
+              </button>
+              <NotificationDropdown />
+              <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-2 text-slate-300">
+                {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+              </button>
             </div>
           </div>
         </div>
       </header>
 
       {/* Mobile Drawer */}
-      {mobileMenuOpen && user && (
+      {mobileMenuOpen && (
         <div className="md:hidden glass-panel border-b border-slate-800 px-4 pt-2 pb-4 space-y-2">
           {navLinks.map((link) => {
             const Icon = link.icon;

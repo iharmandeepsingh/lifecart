@@ -11,34 +11,23 @@ import {
   PieChart, 
   Package, 
   Sparkles, 
-  ArrowRight, 
-  ShieldCheck, 
-  CheckCircle2, 
-  Users, 
-  Zap 
+  ArrowRight
 } from 'lucide-react';
 
 export default function Home() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
     fetch('/api/auth/me')
       .then((res) => res.json())
       .then((data) => {
-        if (data.authenticated && data.user) {
+        if (data.user) {
           setCurrentUser(data.user);
-          if (data.user.householdId) {
-            router.push('/dashboard');
-          } else {
-            router.push('/household/setup');
-          }
         }
       })
-      .catch((err) => console.error(err))
-      .finally(() => setCheckingAuth(false));
-  }, [router]);
+      .catch((err) => console.error(err));
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col relative overflow-hidden">
@@ -59,21 +48,21 @@ export default function Home() {
           </h1>
 
           <p className="text-slate-400 text-base sm:text-lg leading-relaxed max-w-2xl mx-auto">
-            LifeCart is the all-in-one platform for families, roommates, and students to manage shared grocery lists, OCR receipt scanning, expense splitting, and pantry inventory tracking.
+            LifeCart is the all-in-one platform for families, roommates, and students to manage shared grocery lists, OCR receipt scanning, expense splitting, and document wallet storage.
           </p>
 
           <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
             <Link
-              href="/auth/register"
+              href="/dashboard"
               className="gradient-bg gradient-bg-hover text-white font-bold text-base px-8 py-4 rounded-2xl shadow-xl shadow-emerald-500/25 flex items-center gap-2 hover:scale-105 transition-all"
             >
-              Get Started for Free <ArrowRight className="w-5 h-5" />
+              Open Household Dashboard <ArrowRight className="w-5 h-5" />
             </Link>
             <Link
-              href="/auth/login"
+              href="/grocery"
               className="bg-slate-900/90 hover:bg-slate-800 text-slate-200 border border-slate-700 font-semibold text-base px-8 py-4 rounded-2xl transition-all"
             >
-              Sign In to Household
+              View Smart Grocery List
             </Link>
           </div>
         </div>
