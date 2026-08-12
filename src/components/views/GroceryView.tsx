@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 
 const CATEGORIES = ['ALL', 'PRODUCE', 'DAIRY', 'MEAT', 'PANTRY', 'HOUSEHOLD', 'PERSONAL', 'GROCERY'];
-const LOCAL_STORAGE_KEY = 'lifecart_grocery_items_v3';
+const LOCAL_STORAGE_KEY = 'lifecart_grocery_items_v4';
 
 export default function GroceryView() {
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -71,6 +71,11 @@ export default function GroceryView() {
 
   useEffect(() => {
     fetchData();
+    // 3-second live background polling for instant multi-mobile sync
+    const syncInterval = setInterval(() => {
+      fetchData();
+    }, 3000);
+    return () => clearInterval(syncInterval);
   }, []);
 
   const persistItems = (newItems: any[]) => {
@@ -106,7 +111,6 @@ export default function GroceryView() {
       if (groceryData.list?.items) {
         const hasLocalStorageItems = typeof window !== 'undefined' && localStorage.getItem(LOCAL_STORAGE_KEY) !== null;
         
-        // If real DB response OR local storage is empty, update local state
         if (!groceryData.isFallback || !hasLocalStorageItems) {
           persistItems(groceryData.list.items);
         }
@@ -162,6 +166,7 @@ export default function GroceryView() {
           notes: itemNotes,
         }),
       });
+      fetchData();
     } catch (err) {
       console.error('Add item API error:', err);
     }
@@ -230,6 +235,7 @@ export default function GroceryView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isPurchased: nextPurchasedState }),
       });
+      fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -242,6 +248,7 @@ export default function GroceryView() {
 
     try {
       await fetch(`/api/grocery/item/${id}`, { method: 'DELETE' });
+      fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -253,9 +260,7 @@ export default function GroceryView() {
       const res = await fetch('/api/grocery/purchased-to-inventory', { method: 'POST' });
       const data = await res.json();
       showToast(data.message || 'Purchased items transferred to Inventory!');
-      
-      const unpurchasedOnly = items.filter((i) => !i.isPurchased);
-      persistItems(unpurchasedOnly);
+      fetchData();
     } catch (err) {
       console.error(err);
     } finally {
