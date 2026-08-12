@@ -3,11 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { categorizeItem } from '@/lib/ocr';
 
-const memoryItemsStore: any[] = [
-  { id: 'item-1', name: 'Organic Whole Milk', category: 'DAIRY', quantity: 1, unit: 'gal', estimatedPrice: 4.29, isPurchased: false, createdAt: new Date() },
-  { id: 'item-2', name: 'Avocados (Bag of 5)', category: 'PRODUCE', quantity: 1, unit: 'bag', estimatedPrice: 3.99, isPurchased: false, createdAt: new Date() },
-  { id: 'item-3', name: 'Chicken Breast Family Pack', category: 'MEAT', quantity: 1, unit: 'pack', estimatedPrice: 11.49, isPurchased: true, createdAt: new Date() },
-];
+const memoryItemsStore: any[] = [];
 
 export async function GET() {
   const user = await getCurrentUser();

@@ -10,23 +10,7 @@ const FALLBACK_5_MEMBERS = [
   { userId: 'user-arman', user: { id: 'user-arman', name: 'Arman', email: 'arman@lifecart.com' } },
 ];
 
-let inMemoryExpenses: any[] = [
-  {
-    id: 'exp-1',
-    title: 'Weekly Supermarket Grocery Run',
-    amount: 100.00,
-    category: 'GROCERY',
-    date: new Date().toISOString(),
-    paidBy: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' },
-    splits: [
-      { userId: 'user-harman', amount: 20.00, isSettled: true, user: { id: 'user-harman', name: 'Harman' } },
-      { userId: 'user-raj', amount: 20.00, isSettled: false, user: { id: 'user-raj', name: 'Raj' } },
-      { userId: 'user-simar', amount: 20.00, isSettled: false, user: { id: 'user-simar', name: 'Simar' } },
-      { userId: 'user-asis', amount: 20.00, isSettled: false, user: { id: 'user-asis', name: 'Asis' } },
-      { userId: 'user-arman', amount: 20.00, isSettled: false, user: { id: 'user-arman', name: 'Arman' } },
-    ],
-  },
-];
+let inMemoryExpenses: any[] = [];
 
 export async function GET() {
   const user = await getCurrentUser();

@@ -22,23 +22,7 @@ const DEFAULT_5_MEMBERS = [
   { userId: 'user-arman', user: { id: 'user-arman', name: 'Arman', email: 'arman@lifecart.com' } },
 ];
 
-const INITIAL_EXPENSES = [
-  {
-    id: 'exp-seed-1',
-    title: 'Weekly Supermarket Grocery Run',
-    amount: 100.00,
-    category: 'GROCERY',
-    date: new Date().toISOString(),
-    paidBy: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' },
-    splits: [
-      { userId: 'user-harman', amount: 20.00, isSettled: true },
-      { userId: 'user-raj', amount: 20.00, isSettled: false },
-      { userId: 'user-simar', amount: 20.00, isSettled: false },
-      { userId: 'user-asis', amount: 20.00, isSettled: false },
-      { userId: 'user-arman', amount: 20.00, isSettled: false },
-    ],
-  },
-];
+const INITIAL_EXPENSES: any[] = [];
 
 const LOCAL_STORAGE_EXPENSES_KEY = 'lifecart_expenses_v3';
 const LOCAL_STORAGE_SETTLED_KEY = 'lifecart_settled_users_v3';
