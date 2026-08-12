@@ -43,6 +43,8 @@ export default function ExpensesView() {
   const isFetchingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSubmittingRef = useRef(false);
+  // Track whether we've set the initial payer — never overwrite after user picks one
+  const hasSetInitialPayerRef = useRef(false);
 
   const fetchData = useCallback(async (fromPoll = false) => {
     // If polling, skip if a fetch is already in progress to prevent race conditions
@@ -75,9 +77,13 @@ export default function ExpensesView() {
 
       if (expData.members?.length > 0) {
         setMembers(expData.members);
-        if (!paidById) {
+        // Only set the default payer ONCE on initial load — never on subsequent polls
+        if (!hasSetInitialPayerRef.current) {
           const firstId = expData.members[0]?.user?.id || expData.members[0]?.userId;
-          if (firstId) setPaidById(firstId);
+          if (firstId) {
+            setPaidById(firstId);
+            hasSetInitialPayerRef.current = true;
+          }
         }
       }
     } catch (err: any) {
@@ -87,7 +93,7 @@ export default function ExpensesView() {
       isFetchingRef.current = false;
       setLoading(false);
     }
-  }, [paidById]);
+  }, []);
 
   useEffect(() => {
     fetchData();
