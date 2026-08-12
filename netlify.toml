@@ -1,5 +1,5 @@
 [build]
-  command = "npx prisma generate && npm run build"
+  command = "npx prisma generate && npx prisma db push && npm run build"
   publish = ".next"
 
 [[plugins]]
@@ -7,3 +7,4 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  DATABASE_URL = "postgresql://neondb_owner:npg_ut6LlJNPOX0a@ep-summer-cloud-axb95yiz-pooler.c-4.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
