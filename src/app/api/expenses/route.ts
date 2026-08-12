@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/db';
+import { getMemoryExpenses, addMemoryExpense, setMemoryExpenses } from '@/lib/cloudStore';
 
 const FALLBACK_5_MEMBERS = [
   { userId: 'user-harman', user: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' } },
@@ -9,8 +10,6 @@ const FALLBACK_5_MEMBERS = [
   { userId: 'user-asis', user: { id: 'user-asis', name: 'Asis', email: 'asis@lifecart.com' } },
   { userId: 'user-arman', user: { id: 'user-arman', name: 'Arman', email: 'arman@lifecart.com' } },
 ];
-
-let inMemoryExpenses: any[] = [];
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -36,13 +35,25 @@ export async function GET() {
     });
 
     const activeMembers = members.length > 0 ? members : FALLBACK_5_MEMBERS;
+    
+    // Merge cloud memory expenses if present
+    const memoryExps = getMemoryExpenses();
+    if (memoryExps.length > 0) {
+      const existingIds = new Set(expenses.map((e) => e.id));
+      memoryExps.forEach((memExp) => {
+        if (!existingIds.has(memExp.id)) {
+          expenses.unshift(memExp);
+        }
+      });
+    }
+
     const balances: Record<string, number> = {};
     activeMembers.forEach((m) => {
       balances[m.userId] = 0;
     });
 
     expenses.forEach((expense) => {
-      expense.splits.forEach((split) => {
+      expense.splits.forEach((split: any) => {
         if (!split.isSettled && split.userId !== expense.paidById) {
           balances[split.userId] = (balances[split.userId] || 0) - split.amount;
           balances[expense.paidById] = (balances[expense.paidById] || 0) + split.amount;
@@ -52,12 +63,13 @@ export async function GET() {
 
     return NextResponse.json({ expenses, balances, members: activeMembers, isFallback: false });
   } catch (err) {
-    console.warn('Database query failed in GET /api/expenses, returning inMemoryExpenses:', err);
+    console.warn('Database query failed in GET /api/expenses, returning cloud store expenses:', err);
 
+    const memoryExps = getMemoryExpenses();
     const balances: Record<string, number> = {};
     FALLBACK_5_MEMBERS.forEach((m) => (balances[m.userId] = 0));
 
-    inMemoryExpenses.forEach((expense) => {
+    memoryExps.forEach((expense) => {
       const payerId = expense.paidBy?.id || 'user-harman';
       (expense.splits || []).forEach((split: any) => {
         if (!split.isSettled && split.userId !== payerId) {
@@ -69,7 +81,7 @@ export async function GET() {
 
     return NextResponse.json({
       isFallback: true,
-      expenses: inMemoryExpenses,
+      expenses: memoryExps,
       balances,
       members: FALLBACK_5_MEMBERS,
     });
@@ -108,7 +120,7 @@ export async function POST(req: Request) {
       })),
     };
 
-    inMemoryExpenses.unshift(newExpenseObj);
+    addMemoryExpense(newExpenseObj);
 
     try {
       const expense = await prisma.expense.create({
@@ -164,7 +176,8 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: 'Expense ID is required' }, { status: 400 });
     }
 
-    inMemoryExpenses = inMemoryExpenses.filter((e) => e.id !== expenseId);
+    const currentMemory = getMemoryExpenses();
+    setMemoryExpenses(currentMemory.filter((e) => e.id !== expenseId));
 
     try {
       await prisma.expenseSplit.deleteMany({ where: { expenseId } });

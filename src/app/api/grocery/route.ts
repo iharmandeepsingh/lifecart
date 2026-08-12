@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { categorizeItem } from '@/lib/ocr';
-
-const memoryItemsStore: any[] = [];
+import { getMemoryGroceryItems, addMemoryGroceryItem, setMemoryGroceryItems } from '@/lib/cloudStore';
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -42,15 +41,26 @@ export async function GET() {
       });
     }
 
+    // Merge in-memory items if present
+    const memoryItems = getMemoryGroceryItems();
+    if (memoryItems.length > 0) {
+      const existingIds = new Set(list.items.map((i) => i.id));
+      memoryItems.forEach((memItem) => {
+        if (!existingIds.has(memItem.id)) {
+          list!.items.unshift(memItem);
+        }
+      });
+    }
+
     return NextResponse.json({ list, isFallback: false });
   } catch (err) {
-    console.warn('Database query failed in GET /api/grocery, returning fallback memory list:', err);
+    console.warn('Database query failed in GET /api/grocery, returning cloud store list:', err);
     return NextResponse.json({
       isFallback: true,
       list: {
         id: 'demo-list-1',
         title: 'Main Grocery List',
-        items: memoryItemsStore,
+        items: getMemoryGroceryItems(),
       },
     });
   }
@@ -74,6 +84,22 @@ export async function POST(req: Request) {
     const itemQty = Number(quantity) || 1;
     const itemPrice = Number(estimatedPrice) || 0;
     const itemUnit = unit ? String(unit).trim() : 'pcs';
+
+    const newItem = {
+      id: `item-${Date.now()}`,
+      name: cleanName,
+      category: itemCategory,
+      quantity: itemQty,
+      unit: itemUnit,
+      estimatedPrice: itemPrice,
+      isPurchased: false,
+      notes: notes ? String(notes).trim() : null,
+      createdAt: new Date(),
+      addedBy: { id: userId, name: user?.name || 'Harman', email: user?.email || 'harman@lifecart.com' },
+    };
+
+    // Save to global cloud memory store
+    addMemoryGroceryItem(newItem);
 
     try {
       let defaultList = await prisma.groceryList.findFirst({
@@ -111,19 +137,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ item });
     } catch (dbErr) {
       console.warn('Database write failed in POST /api/grocery, using memory fallback item:', dbErr);
-      const newItem = {
-        id: `item-${Date.now()}`,
-        name: cleanName,
-        category: itemCategory,
-        quantity: itemQty,
-        unit: itemUnit,
-        estimatedPrice: itemPrice,
-        isPurchased: false,
-        notes: notes ? String(notes).trim() : null,
-        createdAt: new Date(),
-        addedBy: { id: userId, name: user?.name || 'Alex Morgan', email: user?.email || 'alex@lifecart.com' },
-      };
-      memoryItemsStore.unshift(newItem);
       return NextResponse.json({ item: newItem, isFallback: true });
     }
   } catch (error: any) {
