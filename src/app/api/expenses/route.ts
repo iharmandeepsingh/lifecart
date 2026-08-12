@@ -1,12 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/db';
-import { 
-  getMemoryExpenses, 
-  addMemoryExpense, 
-  setMemoryExpenses,
-  syncPullFromCloud 
-} from '@/lib/cloudStore';
 
 const FALLBACK_5_MEMBERS = [
   { userId: 'user-harman', user: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' } },
@@ -45,9 +39,6 @@ export async function GET() {
   const user = await getCurrentUser();
   const householdId = user?.householdId || 'demo-household-id-1';
 
-  // Sync latest cloud expenses across devices
-  const { expenses: cloudExpenses } = await syncPullFromCloud();
-
   try {
     const expenses = await prisma.expense.findMany({
       where: { householdId },
@@ -68,17 +59,6 @@ export async function GET() {
     });
 
     const activeMembers = members.length > 0 ? members : FALLBACK_5_MEMBERS;
-    
-    // Merge real-time cloud expenses
-    if (cloudExpenses.length > 0) {
-      const existingIds = new Set(expenses.map((e) => e.id));
-      cloudExpenses.forEach((cloudExp) => {
-        if (!existingIds.has(cloudExp.id)) {
-          expenses.unshift(cloudExp);
-        }
-      });
-    }
-
     const balances: Record<string, number> = {};
     activeMembers.forEach((m) => {
       balances[m.userId] = 0;
@@ -95,26 +75,11 @@ export async function GET() {
 
     return NextResponse.json({ expenses, balances, members: activeMembers, isFallback: false });
   } catch (err) {
-    console.warn('Database query failed in GET /api/expenses, returning cloud store expenses:', err);
-
-    const activeExps = cloudExpenses.length > 0 ? cloudExpenses : getMemoryExpenses();
-    const balances: Record<string, number> = {};
-    FALLBACK_5_MEMBERS.forEach((m) => (balances[m.userId] = 0));
-
-    activeExps.forEach((expense) => {
-      const payerId = expense.paidBy?.id || 'user-harman';
-      (expense.splits || []).forEach((split: any) => {
-        if (!split.isSettled && split.userId !== payerId) {
-          balances[split.userId] = (balances[split.userId] || 0) - split.amount;
-          balances[payerId] = (balances[payerId] || 0) + split.amount;
-        }
-      });
-    });
-
+    console.warn('Database query failed in GET /api/expenses:', err);
     return NextResponse.json({
       isFallback: true,
-      expenses: activeExps,
-      balances,
+      expenses: [],
+      balances: {},
       members: FALLBACK_5_MEMBERS,
     });
   }
@@ -137,65 +102,44 @@ export async function POST(req: Request) {
     const requestedPaidById = paidById || user?.id || 'user-harman';
     const payerMember = FALLBACK_5_MEMBERS.find((m) => m.userId === requestedPaidById) || FALLBACK_5_MEMBERS[0];
 
-    const newExpenseObj = {
-      id: `exp-${Date.now()}`,
-      title: cleanTitle,
-      amount: cleanAmount,
-      category: category || 'GROCERY',
-      date: date ? new Date(date).toISOString() : new Date().toISOString(),
-      paidBy: { id: requestedPaidById, name: payerMember.user.name, email: payerMember.user.email },
-      splits: (splits || []).map((s: any) => ({
-        userId: s.userId,
-        amount: Number(s.amount),
-        isSettled: s.userId === requestedPaidById,
-      })),
-    };
+    const realPaidById = await resolveDbUserId(requestedPaidById, payerMember.user.email);
 
-    addMemoryExpense(newExpenseObj);
+    const resolvedSplits = await Promise.all(
+      (splits || []).map(async (split: { userId: string; amount: number }) => {
+        const matchedEmail = EMAIL_MAP[split.userId] || 'harman@lifecart.com';
+        const realUserId = await resolveDbUserId(split.userId, matchedEmail);
+        return {
+          userId: realUserId,
+          amount: Number(split.amount),
+          isSettled: realUserId === realPaidById,
+          settledAt: realUserId === realPaidById ? new Date() : null,
+        };
+      })
+    );
 
-    try {
-      const realPaidById = await resolveDbUserId(requestedPaidById, payerMember.user.email);
-
-      const resolvedSplits = await Promise.all(
-        (splits || []).map(async (split: { userId: string; amount: number }) => {
-          const matchedEmail = EMAIL_MAP[split.userId] || 'harman@lifecart.com';
-          const realUserId = await resolveDbUserId(split.userId, matchedEmail);
-          return {
-            userId: realUserId,
-            amount: Number(split.amount),
-            isSettled: realUserId === realPaidById,
-            settledAt: realUserId === realPaidById ? new Date() : null,
-          };
-        })
-      );
-
-      const expense = await prisma.expense.create({
-        data: {
-          householdId,
-          paidById: realPaidById,
-          title: cleanTitle,
-          amount: cleanAmount,
-          category: category || 'GROCERY',
-          date: date ? new Date(date) : new Date(),
-          splits: {
-            create: resolvedSplits,
+    const expense = await prisma.expense.create({
+      data: {
+        householdId,
+        paidById: realPaidById,
+        title: cleanTitle,
+        amount: cleanAmount,
+        category: category || 'GROCERY',
+        date: date ? new Date(date) : new Date(),
+        splits: {
+          create: resolvedSplits,
+        },
+      },
+      include: {
+        paidBy: { select: { id: true, name: true, email: true } },
+        splits: {
+          include: {
+            user: { select: { id: true, name: true, email: true } },
           },
         },
-        include: {
-          paidBy: { select: { id: true, name: true, email: true } },
-          splits: {
-            include: {
-              user: { select: { id: true, name: true, email: true } },
-            },
-          },
-        },
-      });
+      },
+    });
 
-      return NextResponse.json({ success: true, expense });
-    } catch (dbErr) {
-      console.warn('Database write failed in POST /api/expenses, using fallback store:', dbErr);
-      return NextResponse.json({ success: true, expense: newExpenseObj, isFallback: true });
-    }
+    return NextResponse.json({ success: true, expense, isFallback: false });
   } catch (error: any) {
     console.error('Create expense error:', error);
     return NextResponse.json({ error: error?.message || 'Failed to create expense' }, { status: 500 });
@@ -217,15 +161,8 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: 'Expense ID is required' }, { status: 400 });
     }
 
-    const currentMemory = getMemoryExpenses();
-    setMemoryExpenses(currentMemory.filter((e) => e.id !== expenseId));
-
-    try {
-      await prisma.expenseSplit.deleteMany({ where: { expenseId } });
-      await prisma.expense.delete({ where: { id: expenseId } });
-    } catch (dbErr) {
-      console.warn('Database delete failed in DELETE /api/expenses:', dbErr);
-    }
+    await prisma.expenseSplit.deleteMany({ where: { expenseId } });
+    await prisma.expense.delete({ where: { id: expenseId } });
 
     return NextResponse.json({ success: true, message: 'Expense deleted successfully' });
   } catch (error: any) {
