@@ -40,8 +40,8 @@ const INITIAL_EXPENSES = [
   },
 ];
 
-const LOCAL_STORAGE_EXPENSES_KEY = 'lifecart_expenses_v2';
-const LOCAL_STORAGE_SETTLED_KEY = 'lifecart_settled_users_v2';
+const LOCAL_STORAGE_EXPENSES_KEY = 'lifecart_expenses_v3';
+const LOCAL_STORAGE_SETTLED_KEY = 'lifecart_settled_users_v3';
 
 export default function ExpensesView() {
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -121,8 +121,12 @@ export default function ExpensesView() {
       const expData = await expRes.json();
 
       if (expData.expenses) {
-        // ALWAYS update expenses with fresh server API response for multi-device sync
-        persistExpenses(expData.expenses);
+        const hasLocalStorageExp = typeof window !== 'undefined' && localStorage.getItem(LOCAL_STORAGE_EXPENSES_KEY) !== null;
+        
+        // If real DB response OR local storage is empty, update local state
+        if (!expData.isFallback || !hasLocalStorageExp) {
+          persistExpenses(expData.expenses);
+        }
       }
       if (expData.members && expData.members.length > 0) {
         setMembers(expData.members);
@@ -205,7 +209,6 @@ export default function ExpensesView() {
           splits: activeMembers.map((m) => ({ userId: m.userId, amount: perMemberAmount })),
         }),
       });
-      fetchData();
     } catch (err) {
       console.error('API create expense error:', err);
     }
@@ -218,7 +221,6 @@ export default function ExpensesView() {
 
     try {
       await fetch(`/api/expenses?id=${expenseId}`, { method: 'DELETE' });
-      fetchData();
     } catch (err) {
       console.error('API delete expense error:', err);
     }
@@ -238,7 +240,6 @@ export default function ExpensesView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetUserId }),
       });
-      fetchData();
     } catch (err) {
       console.error(err);
     } finally {

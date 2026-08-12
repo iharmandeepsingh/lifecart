@@ -46,10 +46,11 @@ export async function GET() {
       });
     }
 
-    return NextResponse.json({ list });
+    return NextResponse.json({ list, isFallback: false });
   } catch (err) {
     console.warn('Database query failed in GET /api/grocery, returning fallback memory list:', err);
     return NextResponse.json({
+      isFallback: true,
       list: {
         id: 'demo-list-1',
         title: 'Main Grocery List',
@@ -127,7 +128,7 @@ export async function POST(req: Request) {
         addedBy: { id: userId, name: user?.name || 'Alex Morgan', email: user?.email || 'alex@lifecart.com' },
       };
       memoryItemsStore.unshift(newItem);
-      return NextResponse.json({ item: newItem });
+      return NextResponse.json({ item: newItem, isFallback: true });
     }
   } catch (error: any) {
     console.error('Create grocery item error:', error);

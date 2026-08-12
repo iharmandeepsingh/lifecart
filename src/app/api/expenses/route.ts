@@ -66,7 +66,7 @@ export async function GET() {
       });
     });
 
-    return NextResponse.json({ expenses, balances, members: activeMembers });
+    return NextResponse.json({ expenses, balances, members: activeMembers, isFallback: false });
   } catch (err) {
     console.warn('Database query failed in GET /api/expenses, returning inMemoryExpenses:', err);
 
@@ -84,6 +84,7 @@ export async function GET() {
     });
 
     return NextResponse.json({
+      isFallback: true,
       expenses: inMemoryExpenses,
       balances,
       members: FALLBACK_5_MEMBERS,
@@ -123,7 +124,6 @@ export async function POST(req: Request) {
       })),
     };
 
-    // Add to inMemoryExpenses list
     inMemoryExpenses.unshift(newExpenseObj);
 
     try {
@@ -157,7 +157,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, expense });
     } catch (dbErr) {
       console.warn('Database write failed in POST /api/expenses, using fallback store:', dbErr);
-      return NextResponse.json({ success: true, expense: newExpenseObj });
+      return NextResponse.json({ success: true, expense: newExpenseObj, isFallback: true });
     }
   } catch (error: any) {
     console.error('Create expense error:', error);
@@ -180,7 +180,6 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: 'Expense ID is required' }, { status: 400 });
     }
 
-    // Remove from inMemoryExpenses list permanently
     inMemoryExpenses = inMemoryExpenses.filter((e) => e.id !== expenseId);
 
     try {
