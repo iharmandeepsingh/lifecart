@@ -24,8 +24,8 @@ const DEFAULT_5_MEMBERS = [
 
 const INITIAL_EXPENSES: any[] = [];
 
-const LOCAL_STORAGE_EXPENSES_KEY = 'lifecart_expenses_v4';
-const LOCAL_STORAGE_SETTLED_KEY = 'lifecart_settled_users_v4';
+const LOCAL_STORAGE_EXPENSES_KEY = 'lifecart_expenses_v5';
+const LOCAL_STORAGE_SETTLED_KEY = 'lifecart_settled_users_v5';
 
 export default function ExpensesView() {
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -75,7 +75,7 @@ export default function ExpensesView() {
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('GROCERY');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [paidById, setPaidById] = useState('user-harman');
+  const [paidById, setPaidById] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -118,6 +118,10 @@ export default function ExpensesView() {
       }
       if (expData.members && expData.members.length > 0) {
         setMembers(expData.members);
+        const firstId = expData.members[0]?.user?.id || expData.members[0]?.userId;
+        if (firstId && (!paidById || paidById === 'user-harman')) {
+          setPaidById(firstId);
+        }
       }
     } catch (err) {
       console.error('Fetch expenses error:', err);
@@ -130,16 +134,18 @@ export default function ExpensesView() {
   const calculateBalances = () => {
     const balMap: Record<string, number> = {};
     members.forEach((m) => {
-      balMap[m.userId] = 0;
+      const mId = m.user?.id || m.userId;
+      balMap[mId] = 0;
     });
 
     expenses.forEach((exp) => {
-      const payerId = exp.paidBy?.id || exp.paidById || 'user-harman';
+      const payerId = exp.paidBy?.id || exp.paidById || members[0]?.user?.id || members[0]?.userId || 'user-harman';
       const splits = exp.splits || [];
 
       splits.forEach((s: any) => {
-        if (!s.isSettled && s.userId !== payerId && !settledUserIds.has(s.userId)) {
-          balMap[s.userId] = (balMap[s.userId] || 0) - s.amount;
+        const splitUserId = s.user?.id || s.userId;
+        if (!s.isSettled && splitUserId !== payerId && !settledUserIds.has(splitUserId)) {
+          balMap[splitUserId] = (balMap[splitUserId] || 0) - s.amount;
           balMap[payerId] = (balMap[payerId] || 0) + s.amount;
         }
       });
@@ -157,7 +163,11 @@ export default function ExpensesView() {
 
     const activeMembers = members.length > 0 ? members : DEFAULT_5_MEMBERS;
     const perMemberAmount = parseFloat((numAmount / activeMembers.length).toFixed(2));
-    const selectedPayer = activeMembers.find((m) => m.userId === paidById) || activeMembers[0];
+    
+    const selectedPayer = activeMembers.find((m) => (m.user?.id || m.userId) === paidById) || activeMembers[0];
+    const payerId = selectedPayer.user?.id || selectedPayer.userId;
+    const payerName = selectedPayer.user?.name || 'Harman';
+    const payerEmail = selectedPayer.user?.email || 'harman@lifecart.com';
 
     const newExpense = {
       id: `exp-${Date.now()}`,
@@ -165,20 +175,24 @@ export default function ExpensesView() {
       amount: numAmount,
       category,
       date: new Date(date).toISOString(),
-      paidBy: { id: selectedPayer.userId, name: selectedPayer.user?.name || 'Harman', email: selectedPayer.user?.email || 'harman@lifecart.com' },
-      splits: activeMembers.map((m) => ({
-        userId: m.userId,
-        amount: perMemberAmount,
-        isSettled: m.userId === selectedPayer.userId,
-        user: { name: m.user?.name || m.userId },
-      })),
+      paidBy: { id: payerId, name: payerName, email: payerEmail },
+      splits: activeMembers.map((m) => {
+        const uId = m.user?.id || m.userId;
+        const uName = m.user?.name || uId;
+        return {
+          userId: uId,
+          amount: perMemberAmount,
+          isSettled: uId === payerId,
+          user: { id: uId, name: uName },
+        };
+      }),
     };
 
     const updated = [newExpense, ...expenses];
     persistExpenses(updated);
 
     setIsModalOpen(false);
-    showToast(`Added "$${numAmount.toFixed(2)}" expense paid by ${selectedPayer.user?.name || 'Harman'}!`);
+    showToast(`Added "$${numAmount.toFixed(2)}" manual expense paid by ${payerName}!`);
 
     // Reset Form
     setTitle('');
@@ -193,8 +207,8 @@ export default function ExpensesView() {
           amount: numAmount,
           category,
           date,
-          paidById: selectedPayer.userId,
-          splits: activeMembers.map((m) => ({ userId: m.userId, amount: perMemberAmount })),
+          paidById: payerId,
+          splits: activeMembers.map((m) => ({ userId: m.user?.id || m.userId, amount: perMemberAmount })),
         }),
       });
       fetchData();
@@ -280,12 +294,13 @@ export default function ExpensesView() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {members.map((m) => {
-            const bal = computedBalances[m.userId] || 0;
-            const isMe = m.user.name === 'Harman' || m.userId === currentUser?.id;
+            const memberUserId = m.user?.id || m.userId;
+            const bal = computedBalances[memberUserId] || 0;
+            const isMe = m.user.name === 'Harman' || memberUserId === currentUser?.id;
 
             return (
               <div
-                key={m.userId}
+                key={memberUserId}
                 className="glass-card p-5 rounded-2xl border border-slate-800 flex items-center justify-between gap-4 transition-all hover:border-slate-700"
               >
                 <div className="flex items-center gap-3">
@@ -317,11 +332,11 @@ export default function ExpensesView() {
                 {!isMe && bal !== 0 && (
                   <button
                     type="button"
-                    onClick={() => handleSettleUp(m.userId, m.user.name)}
-                    disabled={settlingUserId === m.userId}
+                    onClick={() => handleSettleUp(memberUserId, m.user.name)}
+                    disabled={settlingUserId === memberUserId}
                     className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold px-3 py-2 rounded-xl transition-all cursor-pointer hover:scale-105"
                   >
-                    {settlingUserId === m.userId ? 'Settling...' : 'Settle Up'}
+                    {settlingUserId === memberUserId ? 'Settling...' : 'Settle Up'}
                   </button>
                 )}
               </div>
@@ -462,15 +477,18 @@ export default function ExpensesView() {
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Paid By Member</label>
                 <select
-                  value={paidById}
+                  value={paidById || (members[0]?.user?.id || members[0]?.userId)}
                   onChange={(e) => setPaidById(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
                 >
-                  {members.map((m) => (
-                    <option key={m.userId} value={m.userId}>
-                      {m.user.name} ({m.user.email})
-                    </option>
-                  ))}
+                  {members.map((m) => {
+                    const mId = m.user?.id || m.userId;
+                    return (
+                      <option key={mId} value={mId}>
+                        {m.user.name} ({m.user.email})
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
