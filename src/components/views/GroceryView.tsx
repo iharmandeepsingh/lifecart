@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   ShoppingCart, Plus, CheckCircle2, Circle, Trash2, User,
   PackageCheck, Sparkles, DollarSign, Filter, Layers, PieChart, Users, X
@@ -18,7 +18,7 @@ export default function GroceryView() {
   const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
   const [transferring, setTransferring] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
-  const submittingRef = useRef(false);
+  const [submittingSplit, setSubmittingSplit] = useState(false);
 
   // Add Form State
   const [itemName, setItemName] = useState('');
@@ -32,21 +32,31 @@ export default function GroceryView() {
   // Split Form State
   const [splitTitle, setSplitTitle] = useState('Weekly Grocery Trip');
   const [splitAmount, setSplitAmount] = useState('50.00');
-  const [submittingSplit, setSubmittingSplit] = useState(false);
 
-  useEffect(() => {
-    fetchData();
-    const syncInterval = setInterval(fetchData, 3000);
-    return () => clearInterval(syncInterval);
-  }, []);
+  // Refs to prevent race conditions
+  const isFetchingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isSubmittingRef = useRef(false);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async (fromPoll = false) => {
+    // If polling, skip if a fetch is already in progress to prevent race conditions
+    if (fromPoll && isFetchingRef.current) return;
+
+    // Cancel any previous in-flight request
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    isFetchingRef.current = true;
+
     try {
       const [userRes, memRes, groceryRes] = await Promise.all([
-        fetch('/api/auth/me'),
-        fetch('/api/household/members'),
-        fetch('/api/grocery'),
+        fetch('/api/auth/me', { signal: controller.signal }),
+        fetch('/api/household/members', { signal: controller.signal }),
+        fetch('/api/grocery', { signal: controller.signal }),
       ]);
+
+      // If this request was aborted, a newer one is already running — bail out
+      if (controller.signal.aborted) return;
 
       const userData = await userRes.json();
       if (userData.user) setCurrentUser(userData.user);
@@ -63,17 +73,29 @@ export default function GroceryView() {
         );
         if (estTotal > 0) setSplitAmount(estTotal.toFixed(2));
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return; // Expected — ignore aborted requests
       console.error('Fetch grocery error:', err);
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+    // Poll every 5 seconds, but skip if a fetch is already in-flight
+    const syncInterval = setInterval(() => fetchData(true), 5000);
+    return () => {
+      clearInterval(syncInterval);
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submittingRef.current || !itemName.trim()) return;
-    submittingRef.current = true;
+    if (isSubmittingRef.current || !itemName.trim()) return;
+    isSubmittingRef.current = true;
 
     const name = itemName.trim();
     setIsModalOpen(false);
@@ -94,13 +116,13 @@ export default function GroceryView() {
           notes: itemNotes,
         }),
       });
-      await fetchData();
+      await fetchData(false); // Non-poll fetch — always runs
       showToast(`Added "${name}" to grocery list!`);
     } catch (err) {
       console.error('Add item error:', err);
       showToast('Failed to add item. Please try again.');
     } finally {
-      submittingRef.current = false;
+      isSubmittingRef.current = false;
     }
   };
 
@@ -154,10 +176,10 @@ export default function GroceryView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isPurchased: !item.isPurchased }),
       });
-      await fetchData();
+      await fetchData(false);
     } catch (err) {
       console.error(err);
-      await fetchData();
+      await fetchData(false);
     }
   };
 
@@ -166,10 +188,10 @@ export default function GroceryView() {
     showToast('Item deleted');
     try {
       await fetch(`/api/grocery/item/${id}`, { method: 'DELETE' });
-      await fetchData();
+      await fetchData(false);
     } catch (err) {
       console.error(err);
-      await fetchData();
+      await fetchData(false);
     }
   };
 
@@ -179,7 +201,7 @@ export default function GroceryView() {
       const res = await fetch('/api/grocery/purchased-to-inventory', { method: 'POST' });
       const data = await res.json();
       showToast(data.message || 'Transferred to Pantry!');
-      await fetchData();
+      await fetchData(false);
     } catch (err) {
       console.error(err);
     } finally {
@@ -212,7 +234,7 @@ export default function GroceryView() {
       <div className="flex flex-wrap items-center justify-between gap-3 glass-panel p-4 rounded-2xl border border-slate-800">
         <div className="text-xs text-slate-400 font-medium flex items-center gap-2">
           <ShoppingCart className="w-4 h-4 text-emerald-400" />
-          Household Grocery List · Live synced every 3s
+          Household Grocery List · Live synced every 5s
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {purchasedCount > 0 && (

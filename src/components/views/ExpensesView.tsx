@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   PieChart as PieChartIcon, 
   DollarSign, 
@@ -31,7 +31,6 @@ export default function ExpensesView() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [settlingUserId, setSettlingUserId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState('');
-  const submittingRef = useRef(false);
 
   // Form State
   const [title, setTitle] = useState('');
@@ -40,43 +39,65 @@ export default function ExpensesView() {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [paidById, setPaidById] = useState('');
 
-  useEffect(() => {
-    fetchData();
-    const syncInterval = setInterval(fetchData, 3000);
-    return () => clearInterval(syncInterval);
-  }, []);
+  // Refs to prevent race conditions
+  const isFetchingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isSubmittingRef = useRef(false);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async (fromPoll = false) => {
+    // If polling, skip if a fetch is already in progress to prevent race conditions
+    if (fromPoll && isFetchingRef.current) return;
+
+    // Cancel any previous in-flight request
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    isFetchingRef.current = true;
+
     try {
       const [userRes, expRes] = await Promise.all([
-        fetch('/api/auth/me'),
-        fetch('/api/expenses'),
+        fetch('/api/auth/me', { signal: controller.signal }),
+        fetch('/api/expenses', { signal: controller.signal }),
       ]);
+
+      // If aborted, do nothing — a newer fetch is already running
+      if (controller.signal.aborted) return;
 
       const userData = await userRes.json();
       if (userData.user) setCurrentUser(userData.user);
 
       const expData = await expRes.json();
 
-      // If server returned real DB data → replace state entirely (single source of truth)
-      // If server returned fallback → keep current state (DB unavailable)
+      // Server is single source of truth: only replace state on real DB data
       if (!expData.isFallback && Array.isArray(expData.expenses)) {
         setExpenses(expData.expenses);
       }
 
-      if (expData.members && expData.members.length > 0) {
+      if (expData.members?.length > 0) {
         setMembers(expData.members);
         if (!paidById) {
           const firstId = expData.members[0]?.user?.id || expData.members[0]?.userId;
           if (firstId) setPaidById(firstId);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return; // Expected — ignore aborted requests
       console.error('Fetch expenses error:', err);
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
     }
-  };
+  }, [paidById]);
+
+  useEffect(() => {
+    fetchData();
+    // Poll every 5 seconds, but skip if a fetch is already in-flight
+    const syncInterval = setInterval(() => fetchData(true), 5000);
+    return () => {
+      clearInterval(syncInterval);
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   const calculateBalances = () => {
     const balMap: Record<string, number> = {};
@@ -100,30 +121,32 @@ export default function ExpensesView() {
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submittingRef.current) return;
+    if (isSubmittingRef.current) return;
     const numAmount = parseFloat(amount);
     if (!title.trim() || isNaN(numAmount) || numAmount <= 0) return;
 
-    submittingRef.current = true;
+    isSubmittingRef.current = true;
 
     const activeMembers = members.length > 0 ? members : DEFAULT_5_MEMBERS;
     const perMemberAmount = parseFloat((numAmount / activeMembers.length).toFixed(2));
     const selectedPayer = activeMembers.find((m) => (m.user?.id || m.userId) === paidById) || activeMembers[0];
     const payerId = selectedPayer.user?.id || selectedPayer.userId;
     const payerName = selectedPayer.user?.name || 'Harman';
+    const savedTitle = title.trim();
+    const savedAmount = numAmount;
 
     setIsModalOpen(false);
-    showToast(`Adding "$${numAmount.toFixed(2)}" expense by ${payerName}…`);
     setTitle('');
     setAmount('');
+    showToast(`Adding "$${savedAmount.toFixed(2)}" expense by ${payerName}…`);
 
     try {
       await fetch('/api/expenses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: title.trim(),
-          amount: numAmount,
+          title: savedTitle,
+          amount: savedAmount,
           category,
           date,
           paidById: payerId,
@@ -133,45 +156,40 @@ export default function ExpensesView() {
           })),
         }),
       });
-      // Let server be source of truth — fetch fresh data immediately
-      await fetchData();
-      showToast(`Added "$${numAmount.toFixed(2)}" expense paid by ${payerName}!`);
+      // Fetch fresh authoritative data from server (non-poll, so always runs)
+      await fetchData(false);
+      showToast(`Added "$${savedAmount.toFixed(2)}" paid by ${payerName}!`);
     } catch (err) {
-      console.error('API create expense error:', err);
-      showToast('Failed to save expense. Please try again.');
+      console.error('Add expense error:', err);
+      showToast('Failed to save. Please try again.');
     } finally {
-      submittingRef.current = false;
+      isSubmittingRef.current = false;
     }
   };
 
   const handleDeleteExpense = async (expenseId: string) => {
-    // Optimistically remove from UI
     setExpenses((prev) => prev.filter((e) => e.id !== expenseId));
     showToast('Expense removed!');
-
     try {
       await fetch(`/api/expenses?id=${expenseId}`, { method: 'DELETE' });
-      await fetchData();
+      await fetchData(false);
     } catch (err) {
-      console.error('API delete expense error:', err);
-      await fetchData(); // Restore correct state on error
+      console.error('Delete expense error:', err);
+      await fetchData(false);
     }
   };
 
   const handleSettleUp = async (targetUserId: string, targetName: string) => {
     setSettlingUserId(targetUserId);
-    const updatedSet = new Set(settledUserIds);
-    updatedSet.add(targetUserId);
-    setSettledUserIds(updatedSet);
+    setSettledUserIds((prev) => new Set([...prev, targetUserId]));
     showToast(`Settled up with ${targetName}!`);
-
     try {
       await fetch('/api/expenses/settle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetUserId }),
       });
-      await fetchData();
+      await fetchData(false);
     } catch (err) {
       console.error(err);
     } finally {
@@ -270,7 +288,7 @@ export default function ExpensesView() {
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <DollarSign className="w-5 h-5 text-emerald-400" /> Expense List ({expenses.length})
           </h2>
-          <span className="text-xs text-slate-500">Live synced · updates every 3s</span>
+          <span className="text-xs text-slate-500">Live synced · updates every 5s</span>
         </div>
 
         {loading ? (
