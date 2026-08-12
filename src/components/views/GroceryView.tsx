@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 
 const CATEGORIES = ['ALL', 'PRODUCE', 'DAIRY', 'MEAT', 'PANTRY', 'HOUSEHOLD', 'PERSONAL', 'GROCERY'];
-const LOCAL_STORAGE_KEY = 'lifecart_grocery_items_v4';
+const LOCAL_STORAGE_KEY = 'lifecart_grocery_items_v6';
 
 export default function GroceryView() {
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -71,7 +71,7 @@ export default function GroceryView() {
 
   useEffect(() => {
     fetchData();
-    // 3-second live background polling for instant multi-mobile sync
+    // 3-second live background polling for real-time multi-device sync
     const syncInterval = setInterval(() => {
       fetchData();
     }, 3000);
@@ -108,16 +108,30 @@ export default function GroceryView() {
       const groceryRes = await fetch('/api/grocery');
       const groceryData = await groceryRes.json();
 
-      if (groceryData.list?.items) {
-        const hasLocalStorageItems = typeof window !== 'undefined' && localStorage.getItem(LOCAL_STORAGE_KEY) !== null;
-        
-        if (!groceryData.isFallback || !hasLocalStorageItems) {
-          persistItems(groceryData.list.items);
-        }
+      if (groceryData.list?.items && Array.isArray(groceryData.list.items)) {
+        setItems((prevItems) => {
+          const mergedMap = new Map();
 
-        const activeList = (!groceryData.isFallback || !hasLocalStorageItems) ? groceryData.list.items : items;
-        const estTotal = activeList.reduce((sum: number, i: any) => sum + (i.estimatedPrice || 0) * (i.quantity || 1), 0);
-        if (estTotal > 0) setSplitAmount(estTotal.toFixed(2));
+          prevItems.forEach((item) => {
+            if (item && item.id) mergedMap.set(item.id, item);
+          });
+
+          groceryData.list.items.forEach((serverItem: any) => {
+            if (serverItem && serverItem.id) {
+              mergedMap.set(serverItem.id, serverItem);
+            }
+          });
+
+          const mergedArray = Array.from(mergedMap.values()).sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(mergedArray));
+          }
+
+          return mergedArray;
+        });
       }
     } catch (err) {
       console.error('Fetch grocery error:', err);

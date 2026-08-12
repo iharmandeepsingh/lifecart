@@ -24,8 +24,8 @@ const DEFAULT_5_MEMBERS = [
 
 const INITIAL_EXPENSES: any[] = [];
 
-const LOCAL_STORAGE_EXPENSES_KEY = 'lifecart_expenses_v5';
-const LOCAL_STORAGE_SETTLED_KEY = 'lifecart_settled_users_v5';
+const LOCAL_STORAGE_EXPENSES_KEY = 'lifecart_expenses_v6';
+const LOCAL_STORAGE_SETTLED_KEY = 'lifecart_settled_users_v6';
 
 export default function ExpensesView() {
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -79,7 +79,7 @@ export default function ExpensesView() {
 
   useEffect(() => {
     fetchData();
-    // 3-second live background polling for instant multi-mobile sync
+    // 3-second live background polling for real-time multi-device sync
     const syncInterval = setInterval(() => {
       fetchData();
     }, 3000);
@@ -109,13 +109,35 @@ export default function ExpensesView() {
       const expRes = await fetch('/api/expenses');
       const expData = await expRes.json();
 
-      if (expData.expenses) {
-        const hasLocalStorageExp = typeof window !== 'undefined' && localStorage.getItem(LOCAL_STORAGE_EXPENSES_KEY) !== null;
-        
-        if (!expData.isFallback || !hasLocalStorageExp) {
-          persistExpenses(expData.expenses);
-        }
+      if (Array.isArray(expData.expenses)) {
+        // Real-time multi-device merge logic: Combine incoming server expenses with local expenses
+        setExpenses((prevExpenses) => {
+          const mergedMap = new Map();
+
+          // 1. Add current local expenses
+          prevExpenses.forEach((exp) => {
+            if (exp && exp.id) mergedMap.set(exp.id, exp);
+          });
+
+          // 2. Merge server expenses
+          expData.expenses.forEach((serverExp: any) => {
+            if (serverExp && serverExp.id) {
+              mergedMap.set(serverExp.id, serverExp);
+            }
+          });
+
+          const mergedArray = Array.from(mergedMap.values()).sort(
+            (a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime()
+          );
+
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(LOCAL_STORAGE_EXPENSES_KEY, JSON.stringify(mergedArray));
+          }
+
+          return mergedArray;
+        });
       }
+
       if (expData.members && expData.members.length > 0) {
         setMembers(expData.members);
         const firstId = expData.members[0]?.user?.id || expData.members[0]?.userId;
