@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/db';
-import { getMemoryExpenses, addMemoryExpense, setMemoryExpenses } from '@/lib/cloudStore';
+import { 
+  getMemoryExpenses, 
+  addMemoryExpense, 
+  setMemoryExpenses,
+  syncPullFromCloud 
+} from '@/lib/cloudStore';
 
 const FALLBACK_5_MEMBERS = [
   { userId: 'user-harman', user: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' } },
@@ -40,6 +45,9 @@ export async function GET() {
   const user = await getCurrentUser();
   const householdId = user?.householdId || 'demo-household-id-1';
 
+  // Sync latest cloud expenses across devices
+  const { expenses: cloudExpenses } = await syncPullFromCloud();
+
   try {
     const expenses = await prisma.expense.findMany({
       where: { householdId },
@@ -61,13 +69,12 @@ export async function GET() {
 
     const activeMembers = members.length > 0 ? members : FALLBACK_5_MEMBERS;
     
-    // Merge cloud memory expenses if present
-    const memoryExps = getMemoryExpenses();
-    if (memoryExps.length > 0) {
+    // Merge real-time cloud expenses
+    if (cloudExpenses.length > 0) {
       const existingIds = new Set(expenses.map((e) => e.id));
-      memoryExps.forEach((memExp) => {
-        if (!existingIds.has(memExp.id)) {
-          expenses.unshift(memExp);
+      cloudExpenses.forEach((cloudExp) => {
+        if (!existingIds.has(cloudExp.id)) {
+          expenses.unshift(cloudExp);
         }
       });
     }
@@ -90,11 +97,11 @@ export async function GET() {
   } catch (err) {
     console.warn('Database query failed in GET /api/expenses, returning cloud store expenses:', err);
 
-    const memoryExps = getMemoryExpenses();
+    const activeExps = cloudExpenses.length > 0 ? cloudExpenses : getMemoryExpenses();
     const balances: Record<string, number> = {};
     FALLBACK_5_MEMBERS.forEach((m) => (balances[m.userId] = 0));
 
-    memoryExps.forEach((expense) => {
+    activeExps.forEach((expense) => {
       const payerId = expense.paidBy?.id || 'user-harman';
       (expense.splits || []).forEach((split: any) => {
         if (!split.isSettled && split.userId !== payerId) {
@@ -106,7 +113,7 @@ export async function GET() {
 
     return NextResponse.json({
       isFallback: true,
-      expenses: memoryExps,
+      expenses: activeExps,
       balances,
       members: FALLBACK_5_MEMBERS,
     });

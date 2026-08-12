@@ -2,7 +2,11 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { categorizeItem } from '@/lib/ocr';
-import { getMemoryGroceryItems, addMemoryGroceryItem, setMemoryGroceryItems } from '@/lib/cloudStore';
+import { 
+  getMemoryGroceryItems, 
+  addMemoryGroceryItem, 
+  syncPullFromCloud 
+} from '@/lib/cloudStore';
 
 const EMAIL_MAP: Record<string, string> = {
   'user-harman': 'harman@lifecart.com',
@@ -32,6 +36,9 @@ async function resolveDbUserId(inputUserId: string, fallbackEmail = 'harman@life
 export async function GET() {
   const user = await getCurrentUser();
   const householdId = user?.householdId || 'demo-household-id-1';
+
+  // Sync latest cloud items across devices
+  const { groceryItems: cloudGroceryItems } = await syncPullFromCloud();
 
   try {
     let list = await prisma.groceryList.findFirst({
@@ -66,13 +73,12 @@ export async function GET() {
       });
     }
 
-    // Merge in-memory items if present
-    const memoryItems = getMemoryGroceryItems();
-    if (memoryItems.length > 0) {
+    // Merge real-time cloud items
+    if (cloudGroceryItems.length > 0) {
       const existingIds = new Set(list.items.map((i) => i.id));
-      memoryItems.forEach((memItem) => {
-        if (!existingIds.has(memItem.id)) {
-          list!.items.unshift(memItem);
+      cloudGroceryItems.forEach((cloudItem) => {
+        if (!existingIds.has(cloudItem.id)) {
+          list!.items.unshift(cloudItem);
         }
       });
     }
@@ -85,7 +91,7 @@ export async function GET() {
       list: {
         id: 'demo-list-1',
         title: 'Main Grocery List',
-        items: getMemoryGroceryItems(),
+        items: cloudGroceryItems.length > 0 ? cloudGroceryItems : getMemoryGroceryItems(),
       },
     });
   }
