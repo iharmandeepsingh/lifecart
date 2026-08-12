@@ -4,6 +4,31 @@ import { prisma } from '@/lib/db';
 import { categorizeItem } from '@/lib/ocr';
 import { getMemoryGroceryItems, addMemoryGroceryItem, setMemoryGroceryItems } from '@/lib/cloudStore';
 
+const EMAIL_MAP: Record<string, string> = {
+  'user-harman': 'harman@lifecart.com',
+  'user-raj': 'raj@lifecart.com',
+  'user-simar': 'simar@lifecart.com',
+  'user-asis': 'asis@lifecart.com',
+  'user-arman': 'arman@lifecart.com',
+};
+
+async function resolveDbUserId(inputUserId: string, fallbackEmail = 'harman@lifecart.com'): Promise<string> {
+  try {
+    const byId = await prisma.user.findUnique({ where: { id: inputUserId } });
+    if (byId) return byId.id;
+
+    const targetEmail = EMAIL_MAP[inputUserId] || fallbackEmail;
+    const byEmail = await prisma.user.findUnique({ where: { email: targetEmail } });
+    if (byEmail) return byEmail.id;
+
+    const firstUser = await prisma.user.findFirst();
+    if (firstUser) return firstUser.id;
+  } catch (e) {
+    console.warn('resolveDbUserId warning in grocery API:', e);
+  }
+  return inputUserId;
+}
+
 export async function GET() {
   const user = await getCurrentUser();
   const householdId = user?.householdId || 'demo-household-id-1';
@@ -70,7 +95,7 @@ export async function POST(req: Request) {
   try {
     const user = await getCurrentUser();
     const householdId = user?.householdId || 'demo-household-id-1';
-    const userId = user?.id || 'demo-user-id-1';
+    const rawUserId = user?.id || 'user-harman';
 
     const body = await req.json().catch(() => ({}));
     const { name, category, quantity, unit, estimatedPrice, assignedToId, notes } = body;
@@ -95,13 +120,15 @@ export async function POST(req: Request) {
       isPurchased: false,
       notes: notes ? String(notes).trim() : null,
       createdAt: new Date(),
-      addedBy: { id: userId, name: user?.name || 'Harman', email: user?.email || 'harman@lifecart.com' },
+      addedBy: { id: rawUserId, name: user?.name || 'Harman', email: user?.email || 'harman@lifecart.com' },
     };
 
-    // Save to global cloud memory store
     addMemoryGroceryItem(newItem);
 
     try {
+      const realAddedById = await resolveDbUserId(rawUserId, 'harman@lifecart.com');
+      const realAssignedToId = assignedToId ? await resolveDbUserId(assignedToId, EMAIL_MAP[assignedToId] || 'harman@lifecart.com') : null;
+
       let defaultList = await prisma.groceryList.findFirst({
         where: { householdId, isDefault: true },
       });
@@ -124,8 +151,8 @@ export async function POST(req: Request) {
           quantity: itemQty,
           unit: itemUnit,
           estimatedPrice: itemPrice,
-          addedById: userId,
-          assignedToId: assignedToId || null,
+          addedById: realAddedById,
+          assignedToId: realAssignedToId,
           notes: notes ? String(notes).trim() : null,
         },
         include: {

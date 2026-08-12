@@ -11,6 +11,31 @@ const FALLBACK_5_MEMBERS = [
   { userId: 'user-arman', user: { id: 'user-arman', name: 'Arman', email: 'arman@lifecart.com' } },
 ];
 
+const EMAIL_MAP: Record<string, string> = {
+  'user-harman': 'harman@lifecart.com',
+  'user-raj': 'raj@lifecart.com',
+  'user-simar': 'simar@lifecart.com',
+  'user-asis': 'asis@lifecart.com',
+  'user-arman': 'arman@lifecart.com',
+};
+
+async function resolveDbUserId(inputUserId: string, fallbackEmail = 'harman@lifecart.com'): Promise<string> {
+  try {
+    const byId = await prisma.user.findUnique({ where: { id: inputUserId } });
+    if (byId) return byId.id;
+
+    const targetEmail = EMAIL_MAP[inputUserId] || fallbackEmail;
+    const byEmail = await prisma.user.findUnique({ where: { email: targetEmail } });
+    if (byEmail) return byEmail.id;
+
+    const firstUser = await prisma.user.findFirst();
+    if (firstUser) return firstUser.id;
+  } catch (e) {
+    console.warn('resolveDbUserId warning:', e);
+  }
+  return inputUserId;
+}
+
 export async function GET() {
   const user = await getCurrentUser();
   const householdId = user?.householdId || 'demo-household-id-1';
@@ -102,9 +127,8 @@ export async function POST(req: Request) {
 
     const cleanTitle = String(title).trim();
     const cleanAmount = Number(amount) || 0;
-    const effectivePaidById = paidById || user?.id || 'user-harman';
-
-    const payerMember = FALLBACK_5_MEMBERS.find((m) => m.userId === effectivePaidById) || FALLBACK_5_MEMBERS[0];
+    const requestedPaidById = paidById || user?.id || 'user-harman';
+    const payerMember = FALLBACK_5_MEMBERS.find((m) => m.userId === requestedPaidById) || FALLBACK_5_MEMBERS[0];
 
     const newExpenseObj = {
       id: `exp-${Date.now()}`,
@@ -112,32 +136,42 @@ export async function POST(req: Request) {
       amount: cleanAmount,
       category: category || 'GROCERY',
       date: date ? new Date(date).toISOString() : new Date().toISOString(),
-      paidBy: { id: effectivePaidById, name: payerMember.user.name, email: payerMember.user.email },
+      paidBy: { id: requestedPaidById, name: payerMember.user.name, email: payerMember.user.email },
       splits: (splits || []).map((s: any) => ({
         userId: s.userId,
         amount: Number(s.amount),
-        isSettled: s.userId === effectivePaidById,
+        isSettled: s.userId === requestedPaidById,
       })),
     };
 
     addMemoryExpense(newExpenseObj);
 
     try {
+      const realPaidById = await resolveDbUserId(requestedPaidById, payerMember.user.email);
+
+      const resolvedSplits = await Promise.all(
+        (splits || []).map(async (split: { userId: string; amount: number }) => {
+          const matchedEmail = EMAIL_MAP[split.userId] || 'harman@lifecart.com';
+          const realUserId = await resolveDbUserId(split.userId, matchedEmail);
+          return {
+            userId: realUserId,
+            amount: Number(split.amount),
+            isSettled: realUserId === realPaidById,
+            settledAt: realUserId === realPaidById ? new Date() : null,
+          };
+        })
+      );
+
       const expense = await prisma.expense.create({
         data: {
           householdId,
-          paidById: effectivePaidById,
+          paidById: realPaidById,
           title: cleanTitle,
           amount: cleanAmount,
           category: category || 'GROCERY',
           date: date ? new Date(date) : new Date(),
           splits: {
-            create: (splits || []).map((split: { userId: string; amount: number }) => ({
-              userId: split.userId,
-              amount: Number(split.amount),
-              isSettled: split.userId === effectivePaidById,
-              settledAt: split.userId === effectivePaidById ? new Date() : null,
-            })),
+            create: resolvedSplits,
           },
         },
         include: {
