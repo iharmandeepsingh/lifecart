@@ -11,15 +11,17 @@ import {
   Sparkles,
   Trash2,
   X,
-  CheckCircle2
+  CheckCircle2,
+  Shield,
+  Lock
 } from 'lucide-react';
 
 const DEFAULT_5_MEMBERS = [
-  { userId: 'user-harman', user: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' } },
-  { userId: 'user-raj', user: { id: 'user-raj', name: 'Raj', email: 'raj@lifecart.com' } },
-  { userId: 'user-simar', user: { id: 'user-simar', name: 'Simar', email: 'simar@lifecart.com' } },
-  { userId: 'user-asis', user: { id: 'user-asis', name: 'Asis', email: 'asis@lifecart.com' } },
-  { userId: 'user-arman', user: { id: 'user-arman', name: 'Arman', email: 'arman@lifecart.com' } },
+  { userId: 'user-harman', role: 'ADMIN', user: { id: 'user-harman', name: 'Harman', email: 'harman@lifecart.com' } },
+  { userId: 'user-raj', role: 'MEMBER', user: { id: 'user-raj', name: 'Raj', email: 'raj@lifecart.com' } },
+  { userId: 'user-simar', role: 'MEMBER', user: { id: 'user-simar', name: 'Simar', email: 'simar@lifecart.com' } },
+  { userId: 'user-asis', role: 'MEMBER', user: { id: 'user-asis', name: 'Asis', email: 'asis@lifecart.com' } },
+  { userId: 'user-arman', role: 'MEMBER', user: { id: 'user-arman', name: 'Arman', email: 'arman@lifecart.com' } },
 ];
 
 export default function ExpensesView() {
@@ -125,6 +127,14 @@ export default function ExpensesView() {
 
   const computedBalances = calculateBalances();
 
+  // Admin permission check: Only Admin (Harman) can settle balances
+  const isAdmin = 
+    currentUser?.role === 'ADMIN' || 
+    currentUser?.role === 'SYSTEM_ADMIN' || 
+    currentUser?.email === 'harman@lifecart.com' || 
+    currentUser?.name === 'Harman' ||
+    currentUser?.household?.members?.some((m: any) => (m.userId === currentUser?.id || m.user?.id === currentUser?.id) && m.role === 'ADMIN');
+
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmittingRef.current) return;
@@ -186,15 +196,24 @@ export default function ExpensesView() {
   };
 
   const handleSettleUp = async (targetUserId: string, targetName: string) => {
+    if (!isAdmin) {
+      showToast('Permission denied: Only household administrators can settle balances.');
+      return;
+    }
+
     setSettlingUserId(targetUserId);
     setSettledUserIds((prev) => new Set([...prev, targetUserId]));
     showToast(`Settled up with ${targetName}!`);
     try {
-      await fetch('/api/expenses/settle', {
+      const res = await fetch('/api/expenses/settle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetUserId }),
       });
+      if (!res.ok) {
+        const errorData = await res.json();
+        showToast(errorData.error || 'Failed to settle balance');
+      }
       await fetchData(false);
     } catch (err) {
       console.error(err);
@@ -237,14 +256,32 @@ export default function ExpensesView() {
 
       {/* Member Balances */}
       <div className="space-y-4">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2">
-          <Users className="w-5 h-5 text-emerald-400" /> Member Balances ({members.length} Members)
-        </h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+            <Users className="w-5 h-5 text-emerald-400" /> Member Balances ({members.length} Members)
+          </h2>
+          <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-xl self-start sm:self-auto">
+            {isAdmin ? (
+              <>
+                <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-emerald-300 font-semibold">Admin Access:</span> You can settle balances
+              </>
+            ) : (
+              <>
+                <Lock className="w-3.5 h-3.5 text-slate-500" />
+                <span className="text-slate-400">Settlements are authorized by Household Admin</span>
+              </>
+            )}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {members.map((m) => {
             const memberUserId = m.user?.id || m.userId;
             const bal = computedBalances[memberUserId] || 0;
-            const isMe = memberUserId === currentUser?.id || m.user?.name === 'Harman';
+            const isMe = memberUserId === currentUser?.id || m.user?.name === currentUser?.name;
+            const isMemberAdmin = m.role === 'ADMIN' || m.user?.name === 'Harman' || m.user?.email === 'harman@lifecart.com';
+
             return (
               <div key={memberUserId} className="glass-card p-5 rounded-2xl border border-slate-800 flex items-center justify-between gap-4 hover:border-slate-700 transition-all">
                 <div className="flex items-center gap-3">
@@ -253,7 +290,9 @@ export default function ExpensesView() {
                   </div>
                   <div>
                     <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                      {m.user.name} {isMe && <span className="text-[10px] text-emerald-400 font-semibold">(Admin)</span>}
+                      {m.user.name} 
+                      {isMemberAdmin && <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-full">Admin</span>}
+                      {isMe && !isMemberAdmin && <span className="text-[10px] text-slate-400 font-semibold bg-slate-800 px-1.5 py-0.5 rounded-full">You</span>}
                     </div>
                     <div className="text-xs mt-0.5">
                       {bal > 0 ? (
@@ -272,7 +311,9 @@ export default function ExpensesView() {
                     </div>
                   </div>
                 </div>
-                {!isMe && bal !== 0 && (
+
+                {/* Only Admin (Harman) has permission to settle up balances; regular members cannot settle */}
+                {isAdmin && !isMe && bal !== 0 && (
                   <button
                     type="button"
                     onClick={() => handleSettleUp(memberUserId, m.user.name)}

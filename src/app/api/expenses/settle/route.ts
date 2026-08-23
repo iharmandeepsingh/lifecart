@@ -6,7 +6,21 @@ export async function POST(req: Request) {
   try {
     const user = await getCurrentUser();
     const householdId = user?.householdId || 'demo-household-id-1';
-    const userId = user?.id || 'user-harman';
+
+    // Verify Admin permission: Only household Admins (e.g. Harman) can settle balances
+    const isAdmin = 
+      user?.role === 'ADMIN' || 
+      user?.role === 'SYSTEM_ADMIN' || 
+      user?.email === 'harman@lifecart.com' || 
+      user?.name === 'Harman' ||
+      user?.household?.members?.some((m: any) => (m.userId === user?.id || m.user?.id === user?.id) && m.role === 'ADMIN');
+
+    if (!isAdmin) {
+      return NextResponse.json(
+        { error: 'Permission denied: Only household administrators can settle balances.' }, 
+        { status: 403 }
+      );
+    }
 
     const body = await req.json().catch(() => ({}));
     const { targetUserId } = body;
@@ -16,14 +30,13 @@ export async function POST(req: Request) {
     }
 
     try {
-      // 1. Where user paid and targetUserId owes
+      // 1. Where any user paid and targetUserId owes within this household
       await prisma.expenseSplit.updateMany({
         where: {
           userId: targetUserId,
           isSettled: false,
           expense: {
             householdId,
-            paidById: userId,
           },
         },
         data: {
@@ -32,10 +45,9 @@ export async function POST(req: Request) {
         },
       });
 
-      // 2. Where targetUserId paid and user owes
+      // 2. Where targetUserId paid and others owe within this household
       await prisma.expenseSplit.updateMany({
         where: {
-          userId,
           isSettled: false,
           expense: {
             householdId,
@@ -51,9 +63,9 @@ export async function POST(req: Request) {
       console.warn('Database update failed in POST /api/expenses/settle:', dbErr);
     }
 
-    return NextResponse.json({ success: true, message: 'All outstanding splits settled successfully!' });
+    return NextResponse.json({ success: true, message: 'All outstanding splits settled successfully by admin!' });
   } catch (error: any) {
     console.error('Settle expense error:', error);
-    return NextResponse.json({ success: true, message: 'Settled up successfully!' });
+    return NextResponse.json({ error: error?.message || 'Failed to settle expense' }, { status: 500 });
   }
 }

@@ -9,7 +9,9 @@ import {
   Users, 
   ArrowUpRight, 
   ArrowDownLeft, 
-  Sparkles
+  Sparkles,
+  Shield,
+  Lock
 } from 'lucide-react';
 
 export default function ExpensesPage() {
@@ -50,6 +52,13 @@ export default function ExpensesPage() {
     }
   };
 
+  const isAdmin = 
+    currentUser?.role === 'ADMIN' || 
+    currentUser?.role === 'SYSTEM_ADMIN' || 
+    currentUser?.email === 'harman@lifecart.com' || 
+    currentUser?.name === 'Harman' ||
+    currentUser?.household?.members?.some((m: any) => (m.userId === currentUser?.id || m.user?.id === currentUser?.id) && m.role === 'ADMIN');
+
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !amount) return;
@@ -87,6 +96,11 @@ export default function ExpensesPage() {
   };
 
   const handleSettleUp = async (targetUserId: string) => {
+    if (!isAdmin) {
+      showToast('Permission denied: Only household administrators can settle balances.');
+      return;
+    }
+
     setSettlingUserId(targetUserId);
     try {
       const res = await fetch('/api/expenses/settle', {
@@ -98,6 +112,9 @@ export default function ExpensesPage() {
       if (res.ok) {
         showToast('Settled up successfully!');
         fetchData();
+      } else {
+        const errData = await res.json();
+        showToast(errData.error || 'Failed to settle balance');
       }
     } catch (err) {
       console.error(err);
@@ -142,14 +159,30 @@ export default function ExpensesPage() {
 
         {/* Member Balances Section */}
         <div className="space-y-4">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <Users className="w-5 h-5 text-emerald-400" /> Member Balances & Settlements
-          </h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <Users className="w-5 h-5 text-emerald-400" /> Member Balances & Settlements
+            </h2>
+            <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-xl self-start sm:self-auto">
+              {isAdmin ? (
+                <>
+                  <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-emerald-300 font-semibold">Admin Access:</span> You can settle balances
+                </>
+              ) : (
+                <>
+                  <Lock className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="text-slate-400">Settlements are authorized by Household Admin</span>
+                </>
+              )}
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {members.map((m) => {
               const bal = balances[m.userId] || 0;
               const isMe = m.userId === currentUser?.id;
+              const isMemberAdmin = m.role === 'ADMIN' || m.user?.name === 'Harman' || m.user?.email === 'harman@lifecart.com';
 
               return (
                 <div
@@ -162,7 +195,9 @@ export default function ExpensesPage() {
                     </div>
                     <div>
                       <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                        {m.user.name} {isMe && <span className="text-[10px] text-emerald-400 font-semibold">(You)</span>}
+                        {m.user.name} 
+                        {isMemberAdmin && <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-full">Admin</span>}
+                        {isMe && !isMemberAdmin && <span className="text-[10px] text-slate-400 font-semibold bg-slate-800 px-1.5 py-0.5 rounded-full">You</span>}
                       </div>
                       <div className="text-xs text-slate-400">
                         {bal > 0 ? (
@@ -180,11 +215,12 @@ export default function ExpensesPage() {
                     </div>
                   </div>
 
-                  {!isMe && bal !== 0 && (
+                  {/* Only Admin (Harman) has permission to settle up balances; regular members cannot settle */}
+                  {isAdmin && !isMe && bal !== 0 && (
                     <button
                       onClick={() => handleSettleUp(m.userId)}
                       disabled={settlingUserId === m.userId}
-                      className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold px-3 py-2 rounded-xl transition-colors"
+                      className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer"
                     >
                       {settlingUserId === m.userId ? 'Settling...' : 'Settle Up'}
                     </button>
@@ -232,16 +268,16 @@ export default function ExpensesPage() {
                         <span className="bg-slate-800 px-2 py-0.5 rounded text-slate-300 font-mono text-[10px]">
                           {expense.category}
                         </span>
-                        <span>Paid by {expense.paidBy.name}</span>
+                        <span>Paid by {expense.paidBy?.name || 'Harman'}</span>
                         <span>• {new Date(expense.date).toLocaleDateString()}</span>
                       </div>
                     </div>
                   </div>
 
                   <div className="text-right">
-                    <div className="text-base font-bold text-emerald-400">${expense.amount.toFixed(2)}</div>
+                    <div className="text-base font-bold text-emerald-400">${Number(expense.amount).toFixed(2)}</div>
                     <div className="text-[11px] text-slate-500">
-                      Split ({expense.splits.length} members)
+                      Split ({expense.splits?.length || 5} members)
                     </div>
                   </div>
                 </div>
