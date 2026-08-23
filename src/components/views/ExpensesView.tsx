@@ -11,9 +11,7 @@ import {
   Sparkles,
   Trash2,
   X,
-  CheckCircle2,
-  Shield,
-  Lock
+  CheckCircle2
 } from 'lucide-react';
 
 const DEFAULT_5_MEMBERS = [
@@ -28,10 +26,8 @@ export default function ExpensesView() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [members, setMembers] = useState<any[]>(DEFAULT_5_MEMBERS);
   const [expenses, setExpenses] = useState<any[]>([]);
-  const [settledUserIds, setSettledUserIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [settlingUserId, setSettlingUserId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState('');
 
   // Form State
@@ -115,7 +111,7 @@ export default function ExpensesView() {
       const payerId = exp.paidBy?.id || exp.paidById;
       (exp.splits || []).forEach((s: any) => {
         const splitUserId = s.user?.id || s.userId;
-        if (!s.isSettled && splitUserId !== payerId && !settledUserIds.has(splitUserId)) {
+        if (splitUserId !== payerId) {
           balMap[splitUserId] = (balMap[splitUserId] || 0) - s.amount;
           balMap[payerId] = (balMap[payerId] || 0) + s.amount;
         }
@@ -126,14 +122,6 @@ export default function ExpensesView() {
   };
 
   const computedBalances = calculateBalances();
-
-  // Admin permission check: Only Admin (Harman) can settle balances
-  const isAdmin = 
-    currentUser?.role === 'ADMIN' || 
-    currentUser?.role === 'SYSTEM_ADMIN' || 
-    currentUser?.email === 'harman@lifecart.com' || 
-    currentUser?.name === 'Harman' ||
-    currentUser?.household?.members?.some((m: any) => (m.userId === currentUser?.id || m.user?.id === currentUser?.id) && m.role === 'ADMIN');
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -195,33 +183,6 @@ export default function ExpensesView() {
     }
   };
 
-  const handleSettleUp = async (targetUserId: string, targetName: string) => {
-    if (!isAdmin) {
-      showToast('Permission denied: Only household administrators can settle balances.');
-      return;
-    }
-
-    setSettlingUserId(targetUserId);
-    setSettledUserIds((prev) => new Set([...prev, targetUserId]));
-    showToast(`Settled up with ${targetName}!`);
-    try {
-      const res = await fetch('/api/expenses/settle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetUserId }),
-      });
-      if (!res.ok) {
-        const errorData = await res.json();
-        showToast(errorData.error || 'Failed to settle balance');
-      }
-      await fetchData(false);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSettlingUserId(null);
-    }
-  };
-
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3500);
@@ -242,7 +203,7 @@ export default function ExpensesView() {
           <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold uppercase tracking-wider mb-1">
             <PieChartIcon className="w-3.5 h-3.5" /> Bill & Expense Splitting
           </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Household Expenses & Settle Up</h1>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Household Expenses</h1>
           <p className="text-sm text-slate-400 mt-1">Real-time sync across all devices via Neon cloud database</p>
         </div>
         <button
@@ -256,23 +217,11 @@ export default function ExpensesView() {
 
       {/* Member Balances */}
       <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <Users className="w-5 h-5 text-emerald-400" /> Member Balances ({members.length} Members)
           </h2>
-          <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-xl self-start sm:self-auto">
-            {isAdmin ? (
-              <>
-                <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-emerald-300 font-semibold">Admin Access:</span> You can settle balances
-              </>
-            ) : (
-              <>
-                <Lock className="w-3.5 h-3.5 text-slate-500" />
-                <span className="text-slate-400">Settlements are authorized by Household Admin</span>
-              </>
-            )}
-          </div>
+          <span className="text-xs text-slate-500">Live updated balances</span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -305,24 +254,12 @@ export default function ExpensesView() {
                         </span>
                       ) : (
                         <span className="text-emerald-400/80 font-semibold flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Settled up
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Balanced ($0.00)
                         </span>
                       )}
                     </div>
                   </div>
                 </div>
-
-                {/* Only Admin (Harman) has permission to settle up balances; regular members cannot settle */}
-                {isAdmin && !isMe && bal !== 0 && (
-                  <button
-                    type="button"
-                    onClick={() => handleSettleUp(memberUserId, m.user.name)}
-                    disabled={settlingUserId === memberUserId}
-                    className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold px-3 py-2 rounded-xl transition-all cursor-pointer hover:scale-105"
-                  >
-                    {settlingUserId === memberUserId ? 'Settling…' : 'Settle Up'}
-                  </button>
-                )}
               </div>
             );
           })}

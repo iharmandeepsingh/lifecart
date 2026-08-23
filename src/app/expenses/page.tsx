@@ -10,8 +10,7 @@ import {
   ArrowUpRight, 
   ArrowDownLeft, 
   Sparkles,
-  Shield,
-  Lock
+  CheckCircle2
 } from 'lucide-react';
 
 export default function ExpensesPage() {
@@ -21,7 +20,6 @@ export default function ExpensesPage() {
   const [balances, setBalances] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [settlingUserId, setSettlingUserId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState('');
 
   // Form State for Manual Expense
@@ -51,13 +49,6 @@ export default function ExpensesPage() {
       setLoading(false);
     }
   };
-
-  const isAdmin = 
-    currentUser?.role === 'ADMIN' || 
-    currentUser?.role === 'SYSTEM_ADMIN' || 
-    currentUser?.email === 'harman@lifecart.com' || 
-    currentUser?.name === 'Harman' ||
-    currentUser?.household?.members?.some((m: any) => (m.userId === currentUser?.id || m.user?.id === currentUser?.id) && m.role === 'ADMIN');
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,34 +86,6 @@ export default function ExpensesPage() {
     }
   };
 
-  const handleSettleUp = async (targetUserId: string) => {
-    if (!isAdmin) {
-      showToast('Permission denied: Only household administrators can settle balances.');
-      return;
-    }
-
-    setSettlingUserId(targetUserId);
-    try {
-      const res = await fetch('/api/expenses/settle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetUserId }),
-      });
-
-      if (res.ok) {
-        showToast('Settled up successfully!');
-        fetchData();
-      } else {
-        const errData = await res.json();
-        showToast(errData.error || 'Failed to settle balance');
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSettlingUserId(null);
-    }
-  };
-
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
@@ -145,8 +108,8 @@ export default function ExpensesPage() {
             <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold uppercase tracking-wider mb-1">
               <PieChartIcon className="w-3.5 h-3.5" /> Bill & Expense Splitting
             </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Household Expenses & Settle Up</h1>
-            <p className="text-sm text-slate-400 mt-1">Automatic expense balances, splitting, and member settlements</p>
+            <h1 className="text-2xl font-bold text-white tracking-tight">Household Expenses</h1>
+            <p className="text-sm text-slate-400 mt-1">Automatic expense balances and member cost splitting</p>
           </div>
 
           <button
@@ -159,23 +122,11 @@ export default function ExpensesPage() {
 
         {/* Member Balances Section */}
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Users className="w-5 h-5 text-emerald-400" /> Member Balances & Settlements
+              <Users className="w-5 h-5 text-emerald-400" /> Member Balances ({members.length} Members)
             </h2>
-            <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-xl self-start sm:self-auto">
-              {isAdmin ? (
-                <>
-                  <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-300 font-semibold">Admin Access:</span> You can settle balances
-                </>
-              ) : (
-                <>
-                  <Lock className="w-3.5 h-3.5 text-slate-500" />
-                  <span className="text-slate-400">Settlements are authorized by Household Admin</span>
-                </>
-              )}
-            </div>
+            <span className="text-xs text-slate-500">Live updated balances</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -209,22 +160,13 @@ export default function ExpensesPage() {
                             <ArrowDownLeft className="w-3.5 h-3.5" /> Owes ${Math.abs(bal).toFixed(2)}
                           </span>
                         ) : (
-                          <span className="text-slate-500">Settled up</span>
+                          <span className="text-emerald-400/80 font-semibold flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Balanced ($0.00)
+                          </span>
                         )}
                       </div>
                     </div>
                   </div>
-
-                  {/* Only Admin (Harman) has permission to settle up balances; regular members cannot settle */}
-                  {isAdmin && !isMe && bal !== 0 && (
-                    <button
-                      onClick={() => handleSettleUp(m.userId)}
-                      disabled={settlingUserId === m.userId}
-                      className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer"
-                    >
-                      {settlingUserId === m.userId ? 'Settling...' : 'Settle Up'}
-                    </button>
-                  )}
                 </div>
               );
             })}
